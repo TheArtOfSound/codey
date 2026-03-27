@@ -35,6 +35,7 @@ from codey.saas.api.billing_routes import router as billing_router  # noqa: E402
 from codey.saas.api.credit_routes import router as credit_router  # noqa: E402
 from codey.saas.api.admin_routes import router as admin_router  # noqa: E402
 from codey.saas.api.referral_routes import router as referral_router  # noqa: E402
+from codey.saas.api.build_routes import router as build_router  # noqa: E402
 
 app.include_router(auth_router)
 app.include_router(user_router)
@@ -44,3 +45,4 @@ app.include_router(billing_router)
 app.include_router(credit_router)
 app.include_router(admin_router)
 app.include_router(referral_router)
+app.include_router(build_router)

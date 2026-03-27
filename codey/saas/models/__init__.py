@@ -1,6 +1,9 @@
 
 from codey.saas.models.api_key import ApiKey
 from codey.saas.models.base import Base
+from codey.saas.models.build_checkpoint import BuildCheckpoint
+from codey.saas.models.build_file import BuildFile
+from codey.saas.models.build_project import BuildProject
 from codey.saas.models.coding_session import CodingSession
 from codey.saas.models.cost_tracking import SessionCost
 from codey.saas.models.credit_transaction import CreditTransaction
@@ -17,6 +20,9 @@ from codey.saas.models.user_memory import UserMemory
 __all__ = [
     "ApiKey",
     "Base",
+    "BuildCheckpoint",
+    "BuildFile",
+    "BuildProject",
     "CodingSession",
     "CreditTransaction",
     "Export",
