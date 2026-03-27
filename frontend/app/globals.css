@@ -239,7 +239,7 @@ code {
   animation: spin-slow 2s linear infinite;
 }
 
-/* NFET score gauge animation */
+/* Health score gauge animation */
 @keyframes score-fill {
   from {
     stroke-dashoffset: 283;

@@ -26,7 +26,7 @@ const plans: PlanCard[] = [
     features: [
       "50 credits / month",
       "Single repo analysis",
-      "Basic NFET metrics",
+      "Basic structural metrics",
       "Community support",
     ],
     cta: "Get started",
@@ -39,7 +39,7 @@ const plans: PlanCard[] = [
     features: [
       "500 credits / month",
       "5 connected repos",
-      "Full NFET dashboard",
+      "Full health dashboard",
       "Collapse prediction",
       "Email support",
     ],
@@ -93,7 +93,7 @@ const topups = [
 const faqItems = [
   {
     q: "What is a credit?",
-    a: "One credit roughly equals one AI-assisted action — a code generation, analysis step, or NFET computation. Simple completions cost 1 credit; complex autonomous tasks may cost 5-20 credits.",
+    a: "One credit roughly equals one AI-assisted action — a code generation, analysis step, or structural health computation. Simple completions cost 1 credit; complex autonomous tasks may cost 5-20 credits.",
   },
   {
     q: "Can I switch plans anytime?",
@@ -314,7 +314,7 @@ export default function PricingPage() {
             <span className="text-codey-green">C</span>ODEY
           </span>
           <p className="text-xs text-codey-text-muted">
-            Powered by NFET — Qira LLC &copy; {new Date().getFullYear()}
+            Qira LLC &copy; {new Date().getFullYear()}
           </p>
         </div>
       </footer>

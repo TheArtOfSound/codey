@@ -46,10 +46,13 @@ interface AnalysisResult {
 function phaseStyle(phase: string): { color: string; bg: string } {
   switch (phase.toUpperCase()) {
     case "RIDGE":
+    case "HEALTHY":
       return { color: "text-codey-green", bg: "bg-codey-green/20" };
     case "CAUTION":
+    case "WATCH":
       return { color: "text-codey-yellow", bg: "bg-codey-yellow/20" };
     case "CRITICAL":
+    case "AT RISK":
       return { color: "text-codey-red", bg: "bg-codey-red/20" };
     default:
       return { color: "text-codey-text-dim", bg: "bg-codey-card" };
@@ -108,7 +111,7 @@ export default function AnalyzePage() {
       setResult({
         score: 0.72,
         grade: "B",
-        phase: "RIDGE",
+        phase: "Healthy",
         metrics: {
           kappa: 0.68,
           sigma: 0.75,
@@ -180,7 +183,7 @@ export default function AnalyzePage() {
           <div>
             <h1 className="text-2xl font-bold text-codey-text">Analysis Report</h1>
             <p className="mt-1 text-sm text-codey-text-dim">
-              NFET structural health assessment for {files.length} file{files.length !== 1 ? "s" : ""}
+              Structural health assessment for {files.length} file{files.length !== 1 ? "s" : ""}
             </p>
           </div>
           <button
@@ -214,17 +217,17 @@ export default function AnalyzePage() {
           {/* Phase */}
           <div className="rounded-xl border border-codey-border bg-codey-card p-5 text-center">
             <p className="text-xs font-medium uppercase tracking-wider text-codey-text-muted">
-              NFET Phase
+              Health Status
             </p>
             <p className={`mt-2 text-2xl font-bold ${pStyle.color}`}>
               {result.phase}
             </p>
           </div>
 
-          {/* ES Score */}
+          {/* Health Score */}
           <div className="rounded-xl border border-codey-border bg-codey-card p-5 text-center">
             <p className="text-xs font-medium uppercase tracking-wider text-codey-text-muted">
-              ES Score
+              Health Score
             </p>
             <p className="mt-2 text-3xl font-bold text-codey-text">
               {result.score.toFixed(3)}
@@ -374,7 +377,7 @@ export default function AnalyzePage() {
       <div>
         <h1 className="text-2xl font-bold text-codey-text">Analyze Codebase</h1>
         <p className="mt-1 text-sm text-codey-text-dim">
-          Upload files for NFET structural health analysis. Get a full report with stress scores and recommendations.
+          Upload files for structural health analysis. Get a full report with complexity scores and recommendations.
         </p>
       </div>
 

@@ -10,14 +10,14 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Codey — Network-Aware Coding Intelligence",
+  title: "Codey — Structural-Aware Coding Intelligence",
   description:
-    "AI-powered coding sessions with NFET traffic analysis. Write better code, understand network impact.",
-  keywords: ["AI", "coding", "NFET", "network analysis", "developer tools"],
+    "AI-powered coding sessions with structural health analysis. Write better code, understand structural impact.",
+  keywords: ["AI", "coding", "structural analysis", "developer tools"],
   openGraph: {
-    title: "Codey — Network-Aware Coding Intelligence",
+    title: "Codey — Structural-Aware Coding Intelligence",
     description:
-      "AI-powered coding sessions with NFET traffic analysis. Write better code, understand network impact.",
+      "AI-powered coding sessions with structural health analysis. Write better code, understand structural impact.",
     type: "website",
   },
 };

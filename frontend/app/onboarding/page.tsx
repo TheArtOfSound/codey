@@ -205,12 +205,12 @@ export default function OnboardingPage() {
               </div>
               <p className="mt-4 text-sm text-codey-text-dim">
                 Describe what you need in plain English. Codey generates production-ready code,
-                analyzes structural health with NFET, and learns how you work over time.
+                analyzes structural health, and learns how you work over time.
               </p>
               <div className="mt-8 grid grid-cols-3 gap-4 text-center">
                 {[
                   { icon: Code, label: "Generate Code", desc: "From prompts" },
-                  { icon: Terminal, label: "NFET Analysis", desc: "Structural health" },
+                  { icon: Terminal, label: "Health Analysis", desc: "Structural health" },
                   { icon: Sparkles, label: "Learns You", desc: "Adapts over time" },
                 ].map(({ icon: Icon, label, desc }) => (
                   <div key={label} className="rounded-lg bg-codey-bg p-3">
@@ -276,7 +276,7 @@ export default function OnboardingPage() {
               {streamComplete && (
                 <div className="mt-3 flex items-center gap-2 text-xs text-codey-green">
                   <CheckCircle2 className="h-3 w-3" />
-                  Generation complete &mdash; 27 lines, NFET: RIDGE
+                  Generation complete &mdash; 27 lines, Health: Healthy
                 </div>
               )}
             </div>
@@ -300,11 +300,11 @@ export default function OnboardingPage() {
               <div className="mt-5 space-y-3">
                 <div className="flex items-center justify-between rounded-lg border border-codey-border bg-codey-bg p-4">
                   <div>
-                    <p className="text-sm font-medium text-codey-text">NFET Score</p>
+                    <p className="text-sm font-medium text-codey-text">Health Score</p>
                     <p className="text-xs text-codey-text-dim">Structural health analysis</p>
                   </div>
                   <span className="inline-flex items-center rounded-full bg-codey-green/20 px-3 py-1 text-sm font-bold text-codey-green">
-                    RIDGE (0.85)
+                    Healthy (0.85)
                   </span>
                 </div>
 

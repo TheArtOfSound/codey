@@ -18,7 +18,7 @@ export default function TermsPage() {
             <p className="mt-2">
               Codey is an AI-powered code generation and analysis platform operated by Qira LLC.
               You provide plain-language prompts, and Codey generates production-ready source code,
-              analyzes structural health using NFET (Non-linear Flow Entropy Topology), and stores
+              analyzes structural health, and stores
               your code in a versioned vault. Codey is a tool, not a replacement for a developer.
               You are responsible for reviewing, testing, and deploying any code Codey generates.
             </p>
@@ -51,7 +51,7 @@ export default function TermsPage() {
               Qira LLC is not responsible for bugs, security vulnerabilities, performance issues,
               data loss, or any other problems that arise from using code that Codey produces. You
               should review all generated code before deploying it to production environments.
-              NFET scores are structural analysis indicators, not guarantees of correctness.
+              Health scores are structural analysis indicators, not guarantees of correctness.
             </p>
           </section>
 

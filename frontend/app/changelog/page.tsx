@@ -19,7 +19,7 @@ const CHANGELOG: ChangelogEntry[] = [
     type: "major",
     features: [
       "AI code generation from natural language prompts with streaming output",
-      "NFET structural health analysis for every generated project",
+      "Structural health analysis for every generated project",
       "Code Vault with full version history, file tree browsing, and restore",
       "Memory system that learns your coding preferences across 7 dimensions",
       "Credit-based usage with Free, Pro, and Team plans",
@@ -27,7 +27,7 @@ const CHANGELOG: ChangelogEntry[] = [
       "GitHub integration for repo linking and autonomous monitoring",
       "Autonomous mode: Codey watches your repos and suggests fixes",
       "Export center: download as ZIP, push to GitHub, or send via webhook",
-      "Session history with NFET health tracking over time",
+      "Session history with health tracking over time",
       "Referral program: earn credits by inviting other developers",
       "Full settings page with profile, notifications, API keys, and billing",
       "Dark-themed responsive UI built for developers",

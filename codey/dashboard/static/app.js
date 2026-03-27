@@ -1,6 +1,6 @@
 /**
  * Codey Structural Health Dashboard — Client
- * Real-time NFET monitoring via WebSocket + REST polling.
+ * Real-time structural health monitoring via WebSocket + REST polling.
  */
 
 (function () {
@@ -49,9 +49,9 @@
 
     function phaseClass(phase) {
         const p = (phase || "").toUpperCase();
-        if (p === "RIDGE" || p === "STABLE") return "ridge";
-        if (p === "CAUTION" || p === "WARNING") return "caution";
-        if (p === "CRITICAL" || p === "DANGER") return "critical";
+        if (p === "RIDGE" || p === "STABLE" || p === "HEALTHY") return "ridge";
+        if (p === "CAUTION" || p === "WARNING" || p === "WATCH") return "caution";
+        if (p === "CRITICAL" || p === "DANGER" || p === "AT RISK") return "critical";
         return "unknown";
     }
 

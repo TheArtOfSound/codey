@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Codey — Network-Aware Autonomous Coding Intelligence</title>
-    <meta name="description" content="The only coding AI that sees your entire codebase as a network. Powered by NFET. Built by Qira LLC.">
+    <meta name="description" content="The only coding AI that sees your entire codebase as a network. Built by Qira LLC.">
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
@@ -327,7 +327,7 @@
 
 <section class="hero">
     <div class="container">
-        <div class="hero-badge">POWERED BY NFET</div>
+        <div class="hero-badge">STRUCTURAL INTELLIGENCE</div>
         <h1>The only coding AI that sees your entire codebase as a <em>network</em></h1>
         <p>Codey maps your codebase topology, predicts cascade failures before they happen, and writes code that keeps your system structurally healthy.</p>
         <a href="#pricing" class="btn btn-primary">Start for free</a>
@@ -349,17 +349,17 @@
                 <div class="demo-line" style="animation-delay: 0.6s"><span class="dim">Scanning /projects/api-service ...</span></div>
                 <div class="demo-line" style="animation-delay: 1.0s"><span class="dim">  847 nodes, 1,203 edges in 0.14s</span></div>
                 <div class="demo-line" style="animation-delay: 1.6s"><br></div>
-                <div class="demo-line" style="animation-delay: 2.0s"><span class="dim">Phase: </span><span class="phase-badge phase-caution">CAUTION</span></div>
-                <div class="demo-line" style="animation-delay: 2.4s"><span class="dim">ES Score: </span><span class="val">0.583</span></div>
-                <div class="demo-line" style="animation-delay: 2.8s"><span class="dim">Kappa:   </span><span class="val">0.487</span>  <span class="dim">Sigma: </span><span class="val">0.218</span></div>
+                <div class="demo-line" style="animation-delay: 2.0s"><span class="dim">Health: </span><span class="phase-badge phase-caution">Watch</span></div>
+                <div class="demo-line" style="animation-delay: 2.4s"><span class="dim">Health Score: </span><span class="val">0.583</span></div>
+                <div class="demo-line" style="animation-delay: 2.8s"><span class="dim">Coupling: </span><span class="val">0.487</span>  <span class="dim">Stability: </span><span class="val">0.218</span></div>
                 <div class="demo-line" style="animation-delay: 3.2s"><br></div>
                 <div class="demo-line" style="animation-delay: 3.6s"><span class="warn">Highest-Stress Components:</span></div>
-                <div class="demo-line" style="animation-delay: 4.0s">  <span class="err">AuthService</span>     <span class="dim">stress=</span><span class="err">0.84</span>  <span class="dim">cascade_depth=</span><span class="val">31</span></div>
-                <div class="demo-line" style="animation-delay: 4.4s">  <span class="warn">PaymentHandler</span>  <span class="dim">stress=</span><span class="warn">0.71</span>  <span class="dim">cascade_depth=</span><span class="val">23</span></div>
-                <div class="demo-line" style="animation-delay: 4.8s">  <span class="ok">UserModel</span>       <span class="dim">stress=</span><span class="ok">0.38</span>  <span class="dim">cascade_depth=</span><span class="val">12</span></div>
+                <div class="demo-line" style="animation-delay: 4.0s">  <span class="err">AuthService</span>     <span class="dim">complexity=</span><span class="err">0.84</span>  <span class="dim">impact_radius=</span><span class="val">31</span></div>
+                <div class="demo-line" style="animation-delay: 4.4s">  <span class="warn">PaymentHandler</span>  <span class="dim">complexity=</span><span class="warn">0.71</span>  <span class="dim">impact_radius=</span><span class="val">23</span></div>
+                <div class="demo-line" style="animation-delay: 4.8s">  <span class="ok">UserModel</span>       <span class="dim">complexity=</span><span class="ok">0.38</span>  <span class="dim">impact_radius=</span><span class="val">12</span></div>
                 <div class="demo-line" style="animation-delay: 5.4s"><br></div>
-                <div class="demo-line" style="animation-delay: 5.8s"><span class="warn">Warning:</span> <span class="dim">AuthService is 16% from cascade boundary.</span></div>
-                <div class="demo-line" style="animation-delay: 6.2s"><span class="dim">Refactoring would move codebase from CAUTION to RIDGE.</span></div>
+                <div class="demo-line" style="animation-delay: 5.8s"><span class="warn">Warning:</span> <span class="dim">AuthService is 16% from stability limit.</span></div>
+                <div class="demo-line" style="animation-delay: 6.2s"><span class="dim">Refactoring would move codebase from Watch to Healthy.</span></div>
             </div>
             <div class="metrics">
                 <div class="metric">
@@ -371,12 +371,12 @@
                     <div class="metric-value">1,203</div>
                 </div>
                 <div class="metric">
-                    <div class="metric-label">ES Score</div>
+                    <div class="metric-label">Health</div>
                     <div class="metric-value" style="color: var(--yellow);">0.583</div>
                 </div>
                 <div class="metric">
-                    <div class="metric-label">Phase</div>
-                    <div class="metric-value" style="color: var(--yellow); font-size: 18px;">CAUTION</div>
+                    <div class="metric-label">Status</div>
+                    <div class="metric-value" style="color: var(--yellow); font-size: 18px;">Watch</div>
                 </div>
             </div>
         </div>
@@ -390,12 +390,12 @@
             <div class="feature-card">
                 <div class="feature-icon">&#x1f578;</div>
                 <h3>Network-Aware Generation</h3>
-                <p>Every line of code is evaluated for its impact on the dependency graph. Codey writes code that keeps your codebase in its stability ridge.</p>
+                <p>Every line of code is evaluated for its impact on the dependency graph. Codey writes code that keeps your codebase in its optimal zone.</p>
             </div>
             <div class="feature-card">
                 <div class="feature-icon">&#x1f6e1;</div>
                 <h3>Collapse Prediction</h3>
-                <p>NFET mathematics detect when components are approaching cascade failure — before it happens. The same math that prevents traffic gridlock.</p>
+                <p>Codey's structural intelligence detects when components are approaching failure — before it happens. Real-time analysis across your entire dependency graph.</p>
             </div>
             <div class="feature-card">
                 <div class="feature-icon">&#x1f916;</div>
@@ -410,7 +410,7 @@
             <div class="feature-card">
                 <div class="feature-icon">&#x1f4ca;</div>
                 <h3>Structural Dashboard</h3>
-                <p>Real-time health monitoring. See kappa, sigma, ES score, and stress levels across your entire codebase at a glance.</p>
+                <p>Real-time health monitoring. See coupling, stability, health scores, and complexity levels across your entire codebase at a glance.</p>
             </div>
             <div class="feature-card">
                 <div class="feature-icon">&#x1f512;</div>
@@ -437,11 +437,11 @@
             <tbody>
                 <tr><td>Code generation</td><td class="check">&#10003;</td><td class="check">&#10003;</td><td class="check">&#10003;</td><td class="check">&#10003;</td></tr>
                 <tr><td>Multi-file editing</td><td class="cross">Limited</td><td class="check">&#10003;</td><td class="check">&#10003;</td><td class="check">&#10003; Atomic</td></tr>
-                <tr><td>Dependency graph model</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="check">&#10003; Full NFET</td></tr>
+                <tr><td>Dependency graph model</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="check">&#10003;</td></tr>
                 <tr><td>Structural stress analysis</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="check">&#10003;</td></tr>
                 <tr><td>Collapse prediction</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="check">&#10003;</td></tr>
                 <tr><td>Cascade simulation</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="check">&#10003;</td></tr>
-                <tr><td>Stability ridge optimization</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="check">&#10003;</td></tr>
+                <tr><td>Structural optimization</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="check">&#10003;</td></tr>
                 <tr><td>Autonomous proactive mode</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="cross">Limited</td><td class="check">&#10003; Full</td></tr>
                 <tr><td>Structural health dashboard</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="check">&#10003;</td></tr>
                 <tr><td>Personal memory system</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="check">&#10003;</td></tr>
@@ -461,7 +461,7 @@
                 <div class="price-credits">10 credits/month</div>
                 <ul class="price-features">
                     <li>Prompt mode</li>
-                    <li>Basic NFET analysis</li>
+                    <li>Basic structural analysis</li>
                     <li>5MB upload limit</li>
                     <li>Community support</li>
                 </ul>
@@ -473,7 +473,7 @@
                 <div class="price-credits">100 credits/month</div>
                 <ul class="price-features">
                     <li>Everything in Free</li>
-                    <li>Full NFET analysis</li>
+                    <li>Full structural analysis</li>
                     <li>1 GitHub repo</li>
                     <li>50MB upload limit</li>
                     <li>Email support</li>
@@ -522,7 +522,7 @@
 
 <footer>
     <div class="container">
-        <div class="footer-brand">Powered by <strong>NFET</strong> &mdash; Qira LLC &copy; 2026</div>
+        <div class="footer-brand"><strong>Codey</strong> &mdash; Qira LLC &copy; 2026</div>
         <div class="footer-links">
             <a href="https://github.com/TheArtOfSound/codey">GitHub</a>
             <a href="#">Docs</a>

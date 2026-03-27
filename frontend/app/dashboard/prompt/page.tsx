@@ -126,7 +126,7 @@ function RenderMarkdown({ text }: { text: string }) {
   );
 }
 
-// ── NFET Delta Display ────────────────────────────────────────────────────────
+// ── Health Delta Display ──────────────────────────────────────────────────────
 
 function NfetDelta({
   label,
@@ -190,7 +190,7 @@ function NfetGrade({ report }: { report: NfetReport }) {
           Score: {report.score.toFixed(3)}
         </p>
         <p className="text-xs text-codey-text-dim">
-          NFET Structural Health Grade
+          Structural Health Grade
         </p>
       </div>
     </div>
@@ -682,7 +682,7 @@ export default function PromptPage() {
         </div>
       )}
 
-      {/* ── NFET / Structural Impact Tab ───────────────────────────── */}
+      {/* ── Structural Impact Tab ────────────────────────────────────── */}
       {activeTab === "nfet" && (
         <div className="space-y-4">
           {stream.nfetBefore || stream.nfetAfter ? (
@@ -770,7 +770,7 @@ export default function PromptPage() {
             <div className="rounded-xl border border-codey-border bg-codey-card p-6">
               <div className="flex h-48 items-center justify-center text-sm text-codey-text-dim">
                 {stream.isComplete
-                  ? "No NFET data available for this session"
+                  ? "No health data available for this session"
                   : "Waiting for structural analysis..."}
               </div>
             </div>

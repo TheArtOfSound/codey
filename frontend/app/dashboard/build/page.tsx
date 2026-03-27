@@ -298,7 +298,7 @@ function monacoLangFromPath(filePath: string): string {
   return map[ext || ""] || "plaintext";
 }
 
-// ── NFET Gauge Component ──────────────────────────────────────────────────────
+// ── Health Gauge Component ────────────────────────────────────────────────────
 
 function NfetGauge({
   label,
@@ -1383,7 +1383,7 @@ export default function BuildPage() {
             </div>
           </div>
 
-          {/* RIGHT PANEL - NFET Health & Alerts */}
+          {/* RIGHT PANEL - Health & Alerts */}
           <div className="flex w-72 shrink-0 flex-col bg-codey-card">
             <div className="border-b border-codey-border px-4 py-3">
               <div className="flex items-center justify-between">
@@ -1398,18 +1398,18 @@ export default function BuildPage() {
               </div>
             </div>
 
-            {/* NFET Gauges */}
+            {/* Health Gauges */}
             <div className="space-y-4 border-b border-codey-border/50 px-4 py-4">
               <NfetGauge
-                label="ES Score"
+                label="Health Score"
                 value={nfetHealth?.es_score ?? 0}
               />
               <NfetGauge
-                label="Kappa"
+                label="Coupling"
                 value={nfetHealth?.kappa ?? 0}
               />
               <NfetGauge
-                label="Sigma"
+                label="Stability"
                 value={nfetHealth?.sigma ?? 0}
               />
             </div>
@@ -1418,7 +1418,7 @@ export default function BuildPage() {
             {nfetHealth?.phase && (
               <div className="border-b border-codey-border/50 px-4 py-3">
                 <span className="text-[10px] uppercase tracking-wider text-codey-text-muted">
-                  NFET Phase
+                  Health Status
                 </span>
                 <div className="mt-1 flex items-center gap-2">
                   <Cpu className="h-3.5 w-3.5 text-codey-text-dim" />
@@ -1602,19 +1602,19 @@ export default function BuildPage() {
           </div>
         )}
 
-        {/* NFET health snapshot */}
+        {/* Health snapshot */}
         {checkpoint.nfet && (
           <div className="rounded-xl border border-codey-border bg-codey-card p-5">
             <h3 className="mb-4 text-sm font-semibold text-codey-text">
-              NFET Health Snapshot
+              Health Snapshot
             </h3>
             <div className="grid grid-cols-3 gap-4">
               <NfetGauge
-                label="ES Score"
+                label="Health Score"
                 value={checkpoint.nfet.es_score}
               />
-              <NfetGauge label="Kappa" value={checkpoint.nfet.kappa} />
-              <NfetGauge label="Sigma" value={checkpoint.nfet.sigma} />
+              <NfetGauge label="Coupling" value={checkpoint.nfet.kappa} />
+              <NfetGauge label="Stability" value={checkpoint.nfet.sigma} />
             </div>
           </div>
         )}
@@ -1766,7 +1766,7 @@ export default function BuildPage() {
           </div>
         </div>
 
-        {/* NFET Health Grade */}
+        {/* Health Grade */}
         <div
           className={`flex items-center gap-5 rounded-2xl border p-6 ${gradeBgColor(grade)}`}
         >
@@ -1777,10 +1777,10 @@ export default function BuildPage() {
           </div>
           <div>
             <p className="text-sm font-semibold text-codey-text">
-              NFET Structural Health Grade
+              Structural Health Grade
             </p>
             <p className="mt-0.5 text-xs text-codey-text-dim">
-              ES Score: {completionStats.nfet_es_score.toFixed(3)}
+              Health Score: {completionStats.nfet_es_score.toFixed(3)}
             </p>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {completionStats.languages.map((lang) => (
@@ -1825,7 +1825,7 @@ export default function BuildPage() {
               </span>
             </div>
             <div className="flex items-center justify-between text-xs">
-              <span className="text-codey-text-dim">NFET analysis</span>
+              <span className="text-codey-text-dim">Structural analysis</span>
               <span className="font-mono text-codey-text">
                 {Math.round(completionStats.credits_charged * 0.15)}
               </span>

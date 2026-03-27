@@ -67,9 +67,9 @@ function relativeTime(dateStr: string): string {
 
 function nfetPhase(score: number | null): { label: string; color: string; bg: string } {
   if (score === null) return { label: "N/A", color: "text-codey-text-dim", bg: "bg-codey-card" };
-  if (score >= 0.7) return { label: "RIDGE", color: "text-codey-green", bg: "bg-codey-green/20" };
-  if (score >= 0.4) return { label: "CAUTION", color: "text-codey-yellow", bg: "bg-codey-yellow/20" };
-  return { label: "CRITICAL", color: "text-codey-red", bg: "bg-codey-red/20" };
+  if (score >= 0.7) return { label: "Healthy", color: "text-codey-green", bg: "bg-codey-green/20" };
+  if (score >= 0.4) return { label: "Watch", color: "text-codey-yellow", bg: "bg-codey-yellow/20" };
+  return { label: "At Risk", color: "text-codey-red", bg: "bg-codey-red/20" };
 }
 
 function languageIcon(lang: string): string {
@@ -209,7 +209,7 @@ export default function VaultPage() {
             nfet_score: 0.74,
             session_count: 9,
             versions: [
-              { id: "v2", version: 2, created_at: new Date(Date.now() - 7200_000).toISOString(), nfet_score: 0.74, prompt_summary: "Add NFET analysis endpoints", lines_changed: 450 },
+              { id: "v2", version: 2, created_at: new Date(Date.now() - 7200_000).toISOString(), nfet_score: 0.74, prompt_summary: "Add analysis endpoints", lines_changed: 450 },
               { id: "v1", version: 1, created_at: new Date(Date.now() - 259200_000).toISOString(), nfet_score: 0.61, prompt_summary: "FastAPI scaffold with auth routes", lines_changed: 1800 },
             ],
             file_tree: [
@@ -235,7 +235,7 @@ export default function VaultPage() {
             nfet_score: 0.91,
             session_count: 4,
             versions: [
-              { id: "v1", version: 1, created_at: new Date(Date.now() - 432000_000).toISOString(), nfet_score: 0.91, prompt_summary: "Core NFET analysis engine", lines_changed: 3200 },
+              { id: "v1", version: 1, created_at: new Date(Date.now() - 432000_000).toISOString(), nfet_score: 0.91, prompt_summary: "Core analysis engine", lines_changed: 3200 },
             ],
             file_tree: [
               { name: "src", type: "directory", children: [
@@ -442,7 +442,7 @@ export default function VaultPage() {
                           <span>{currentVersion.lines_changed} lines changed</span>
                           {currentNfet && (
                             <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 font-medium ${currentNfet.bg} ${currentNfet.color}`}>
-                              NFET: {currentNfet.label}
+                              Health: {currentNfet.label}
                             </span>
                           )}
                         </div>

@@ -53,9 +53,9 @@ function nfetPhase(score: number | null): {
   bg: string;
 } {
   if (score === null) return { label: "N/A", color: "text-codey-text-dim", bg: "bg-codey-card" };
-  if (score >= 0.7) return { label: "RIDGE", color: "text-codey-green", bg: "bg-codey-green/20" };
-  if (score >= 0.4) return { label: "CAUTION", color: "text-codey-yellow", bg: "bg-codey-yellow/20" };
-  return { label: "CRITICAL", color: "text-codey-red", bg: "bg-codey-red/20" };
+  if (score >= 0.7) return { label: "Healthy", color: "text-codey-green", bg: "bg-codey-green/20" };
+  if (score >= 0.4) return { label: "Watch", color: "text-codey-yellow", bg: "bg-codey-yellow/20" };
+  return { label: "At Risk", color: "text-codey-red", bg: "bg-codey-red/20" };
 }
 
 // ── Quick Action Card ─────────────────────────────────────────────────────────
@@ -210,7 +210,7 @@ export default function DashboardPage() {
           href="/dashboard/analyze"
           icon={Upload}
           title="Upload & analyze"
-          description="Get NFET structural health for any codebase"
+          description="Get structural health analysis for any codebase"
         />
         <QuickAction
           icon={GitBranch}
@@ -250,7 +250,7 @@ export default function DashboardPage() {
                   <th className="px-5 py-3 font-medium">Prompt</th>
                   <th className="px-5 py-3 font-medium">Status</th>
                   <th className="hidden px-5 py-3 font-medium md:table-cell">Credits</th>
-                  <th className="hidden px-5 py-3 font-medium lg:table-cell">NFET</th>
+                  <th className="hidden px-5 py-3 font-medium lg:table-cell">Health</th>
                   <th className="px-5 py-3 font-medium text-right">When</th>
                 </tr>
               </thead>

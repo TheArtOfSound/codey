@@ -64,12 +64,12 @@ function LiveDemo() {
     { text: "Building dependency graph ██████████ 100%", cls: "text-codey-green" },
     { text: "", cls: "" },
     {
-      text: "  NFET Traffic Report",
+      text: "  Structural Report",
       cls: "text-codey-text font-bold",
     },
     { text: "  ├─ Nodes: 847   Edges: 3,291", cls: "text-codey-text-dim" },
-    { text: "  ├─ κ (kappa):  0.82  ── coupling health", cls: "text-codey-green" },
-    { text: "  ├─ σ (sigma):  0.14  ── stress level", cls: "text-codey-green" },
+    { text: "  ├─ Coupling:   0.82  ── coupling health", cls: "text-codey-green" },
+    { text: "  ├─ Stability:  0.14  ── stress level", cls: "text-codey-green" },
     { text: "  ├─ Phase:      Laminar Flow ✓", cls: "text-codey-green" },
     { text: "", cls: "" },
     {
@@ -77,16 +77,16 @@ function LiveDemo() {
       cls: "text-codey-yellow",
     },
     {
-      text: '    → src/api/handlers.ts  (fan-in: 34, σ_local: 0.71)',
+      text: '    → src/api/handlers.ts  (fan-in: 34, local stability: 0.71)',
       cls: "text-codey-yellow",
     },
     {
-      text: '    → src/db/queries.ts    (fan-in: 28, σ_local: 0.63)',
+      text: '    → src/db/queries.ts    (fan-in: 28, local stability: 0.63)',
       cls: "text-codey-yellow",
     },
     { text: "", cls: "" },
     {
-      text: "  Generating refactor plan to reduce cascade risk...",
+      text: "  Generating refactor plan to improve stability...",
       cls: "text-codey-text-dim",
     },
     {
@@ -129,11 +129,11 @@ function LiveDemo() {
             <span className="inline-block h-4 w-2 animate-pulse bg-codey-green/80" />
           )}
         </div>
-        {/* NFET gauges bar */}
+        {/* Health gauges bar */}
         <div className="flex items-center justify-between border-t border-codey-border px-5 py-3">
           <div className="flex items-center gap-6 text-xs">
-            <GaugePill label="κ" value={0.82} color="green" />
-            <GaugePill label="σ" value={0.14} color="green" />
+            <GaugePill label="Coupling" value={0.82} color="green" />
+            <GaugePill label="Stability" value={0.14} color="green" />
           </div>
           <span className="badge-green text-xs">Laminar Flow</span>
         </div>
@@ -182,7 +182,7 @@ const features = [
   {
     icon: Shield,
     title: "Collapse Prediction",
-    desc: "NFET stress analysis identifies modules on the edge of cascading failure. Codey warns you before a refactor triggers a chain reaction across your system.",
+    desc: "Structural stress analysis identifies modules on the edge of cascading failure. Codey warns you before a refactor triggers a chain reaction across your system.",
   },
   {
     icon: Bot,
@@ -227,8 +227,8 @@ function CellIcon({ value }: { value: CellValue }) {
 
 const faqItems = [
   {
-    q: "What is NFET?",
-    a: "NFET (Network Flow Equilibrium Theory) models your codebase as a traffic network. It quantifies coupling, stress, and cascade risk — metrics no other tool provides.",
+    q: "What is structural health analysis?",
+    a: "Codey models your codebase as a dependency network. It quantifies coupling, stress, and cascade risk — metrics no other tool provides.",
   },
   {
     q: "How is Codey different from Copilot?",
@@ -300,7 +300,7 @@ export default function LandingPage() {
       <section className="relative z-10 mx-auto max-w-5xl px-6 pb-20 pt-16 text-center md:pt-28">
         <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-codey-border bg-codey-card px-4 py-1.5 text-xs text-codey-text-dim">
           <Zap className="h-3 w-3 text-codey-green" />
-          Powered by NFET — Network Flow Equilibrium Theory
+          Powered by structural health analysis
         </div>
         <h1 className="mx-auto max-w-4xl text-4xl font-bold leading-tight tracking-tight md:text-6xl">
           The only coding AI that sees your entire codebase{" "}
@@ -437,7 +437,7 @@ export default function LandingPage() {
               <span className="text-codey-green">C</span>ODEY
             </span>
             <p className="mt-1 text-xs text-codey-text-muted">
-              Powered by NFET — Qira LLC
+              Qira LLC
             </p>
           </div>
           <div className="flex gap-6 text-sm text-codey-text-dim">

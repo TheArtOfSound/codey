@@ -76,9 +76,9 @@ function modeIcon(mode: string) {
 
 function nfetPhase(score: number | null): { label: string; color: string; bg: string } {
   if (score === null) return { label: "N/A", color: "text-codey-text-dim", bg: "bg-codey-card" };
-  if (score >= 0.7) return { label: "RIDGE", color: "text-codey-green", bg: "bg-codey-green/20" };
-  if (score >= 0.4) return { label: "CAUTION", color: "text-codey-yellow", bg: "bg-codey-yellow/20" };
-  return { label: "CRITICAL", color: "text-codey-red", bg: "bg-codey-red/20" };
+  if (score >= 0.7) return { label: "Healthy", color: "text-codey-green", bg: "bg-codey-green/20" };
+  if (score >= 0.4) return { label: "Watch", color: "text-codey-yellow", bg: "bg-codey-yellow/20" };
+  return { label: "At Risk", color: "text-codey-red", bg: "bg-codey-red/20" };
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -206,7 +206,7 @@ export default function SessionsPage() {
                   <th className="px-5 py-3 font-medium">Prompt</th>
                   <th className="px-5 py-3 font-medium">Status</th>
                   <th className="hidden px-5 py-3 font-medium md:table-cell">Credits</th>
-                  <th className="hidden px-5 py-3 font-medium lg:table-cell">NFET</th>
+                  <th className="hidden px-5 py-3 font-medium lg:table-cell">Health</th>
                   <th className="px-5 py-3 w-8" />
                 </tr>
               </thead>
@@ -306,12 +306,12 @@ export default function SessionsPage() {
                                 </div>
                               )}
 
-                              {/* NFET Impact */}
+                              {/* Health Impact */}
                               <div className="flex flex-wrap gap-4">
                                 {session.nfet_score_before !== null && (
                                   <div className="rounded-lg bg-codey-card px-4 py-3">
                                     <p className="text-xs text-codey-text-muted">
-                                      NFET Before
+                                      Health Before
                                     </p>
                                     <p className="mt-1 text-lg font-bold text-codey-text">
                                       {session.nfet_score_before.toFixed(3)}
@@ -321,7 +321,7 @@ export default function SessionsPage() {
                                 {session.nfet_score_after !== null && (
                                   <div className="rounded-lg bg-codey-card px-4 py-3">
                                     <p className="text-xs text-codey-text-muted">
-                                      NFET After
+                                      Health After
                                     </p>
                                     <p
                                       className={`mt-1 text-lg font-bold ${
