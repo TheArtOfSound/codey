@@ -1,0 +1,251 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Base ──────────────────────────────────────────────────────────────── */
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  ::selection {
+    background-color: rgba(0, 255, 136, 0.2);
+    color: #e0e0e8;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    overflow-x: hidden;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #0a0a0f;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #2a2a3e;
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #3a3a4e;
+  }
+
+  /* Firefox scrollbar */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #2a2a3e #0a0a0f;
+  }
+}
+
+/* ── Components ────────────────────────────────────────────────────────── */
+
+@layer components {
+  /* Card */
+  .card {
+    @apply rounded-xl border border-codey-border bg-codey-card p-6 transition-colors;
+  }
+
+  .card-hover {
+    @apply card hover:border-codey-border-light hover:bg-codey-card-hover;
+  }
+
+  /* Buttons */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-codey-bg disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply btn bg-codey-green text-codey-bg hover:shadow-glow-green focus:ring-codey-green;
+  }
+
+  .btn-secondary {
+    @apply btn border border-codey-border bg-codey-card text-codey-text hover:border-codey-border-light hover:bg-codey-card-hover focus:ring-codey-border;
+  }
+
+  .btn-danger {
+    @apply btn bg-codey-red text-white hover:shadow-glow-red focus:ring-codey-red;
+  }
+
+  .btn-ghost {
+    @apply btn text-codey-text-dim hover:bg-codey-card hover:text-codey-text focus:ring-codey-border;
+  }
+
+  /* Input */
+  .input {
+    @apply w-full rounded-lg border border-codey-border bg-codey-bg px-4 py-2.5 text-sm text-codey-text placeholder-codey-text-muted transition-colors focus:border-codey-green focus:outline-none focus:ring-1 focus:ring-codey-green;
+  }
+
+  /* Badge */
+  .badge {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
+
+  .badge-green {
+    @apply badge border border-codey-green/30 bg-codey-green-glow text-codey-green;
+  }
+
+  .badge-red {
+    @apply badge border border-codey-red/30 bg-codey-red-glow text-codey-red;
+  }
+
+  .badge-yellow {
+    @apply badge border border-codey-yellow/30 bg-codey-yellow-glow text-codey-yellow;
+  }
+
+  .badge-neutral {
+    @apply badge border border-codey-border bg-codey-card text-codey-text-dim;
+  }
+}
+
+/* ── Utilities ─────────────────────────────────────────────────────────── */
+
+@layer utilities {
+  .text-gradient-green {
+    @apply bg-gradient-to-r from-codey-green to-emerald-400 bg-clip-text text-transparent;
+  }
+
+  .glow-border-green {
+    box-shadow: 0 0 0 1px rgba(0, 255, 136, 0.3),
+      0 0 15px rgba(0, 255, 136, 0.1);
+  }
+
+  .glow-border-red {
+    box-shadow: 0 0 0 1px rgba(255, 68, 68, 0.3),
+      0 0 15px rgba(255, 68, 68, 0.1);
+  }
+}
+
+/* ── Code / Syntax ─────────────────────────────────────────────────────── */
+
+pre,
+code {
+  font-family: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+}
+
+.code-block {
+  background: #0a0a0f;
+  border: 1px solid #2a2a3e;
+  border-radius: 0.75rem;
+  overflow-x: auto;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+
+.code-block code {
+  display: block;
+  padding: 1rem 1.25rem;
+  color: #e0e0e8;
+}
+
+/* Syntax token colors (for lightweight highlighting without a full library) */
+.token-keyword {
+  color: #c792ea;
+}
+.token-string {
+  color: #c3e88d;
+}
+.token-number {
+  color: #f78c6c;
+}
+.token-comment {
+  color: #55556a;
+  font-style: italic;
+}
+.token-function {
+  color: #82aaff;
+}
+.token-operator {
+  color: #89ddff;
+}
+.token-type {
+  color: #ffcb6b;
+}
+.token-variable {
+  color: #e0e0e8;
+}
+.token-punctuation {
+  color: #89ddff;
+}
+.token-builtin {
+  color: #f07178;
+}
+
+/* Line numbers in code blocks */
+.code-line-number {
+  display: inline-block;
+  width: 2.5rem;
+  text-align: right;
+  padding-right: 1rem;
+  color: #3a3a4e;
+  user-select: none;
+}
+
+/* ── Monaco editor overrides ───────────────────────────────────────────── */
+
+.monaco-editor,
+.monaco-editor .margin,
+.monaco-editor-background {
+  background-color: #0a0a0f !important;
+}
+
+.monaco-editor .minimap {
+  opacity: 0.4;
+}
+
+/* ── Animations ────────────────────────────────────────────────────────── */
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    #14141f 25%,
+    #1a1a2e 50%,
+    #14141f 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: 0.5rem;
+}
+
+/* Spinner used in loading states */
+@keyframes spin-slow {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin-slow {
+  animation: spin-slow 2s linear infinite;
+}
+
+/* NFET score gauge animation */
+@keyframes score-fill {
+  from {
+    stroke-dashoffset: 283;
+  }
+}
+
+.nfet-gauge {
+  animation: score-fill 1.2s ease-out forwards;
+}

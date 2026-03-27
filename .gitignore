@@ -1,0 +1,8 @@
+.env
+*.pyc
+__pycache__/
+.codey/
+*.db
+node_modules/
+.next/
+dist/

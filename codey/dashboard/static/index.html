@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Codey — Structural Health Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <div class="header-left">
+            <h1 class="brand">CODEY</h1>
+            <span class="subtitle">Structural Health Dashboard</span>
+        </div>
+        <div class="header-right">
+            <span class="connection-status" id="conn-status">
+                <span class="dot disconnected" id="conn-dot"></span>
+                <span id="conn-label">Disconnected</span>
+            </span>
+        </div>
+    </header>
+
+    <main class="grid">
+        <!-- ── Network Status Panel ──────────────────────────── -->
+        <section class="card" id="status-panel">
+            <div class="card-header">
+                <h2>Network Status</h2>
+                <span class="phase-badge" id="phase-badge">UNKNOWN</span>
+            </div>
+            <div class="card-body">
+                <div class="gauges">
+                    <div class="gauge">
+                        <div class="gauge-label">Kappa (κ)</div>
+                        <div class="gauge-value" id="val-kappa">—</div>
+                        <div class="gauge-bar-track"><div class="gauge-bar" id="bar-kappa"></div></div>
+                    </div>
+                    <div class="gauge">
+                        <div class="gauge-label">Sigma (σ)</div>
+                        <div class="gauge-value" id="val-sigma">—</div>
+                        <div class="gauge-bar-track"><div class="gauge-bar" id="bar-sigma"></div></div>
+                    </div>
+                    <div class="gauge">
+                        <div class="gauge-label">ES Score</div>
+                        <div class="gauge-value" id="val-es">
+                            <span id="val-es-num">—</span>
+                            <span class="trend-arrow" id="es-trend"></span>
+                        </div>
+                        <div class="gauge-bar-track"><div class="gauge-bar es-bar" id="bar-es"></div></div>
+                    </div>
+                </div>
+                <div class="stats-row">
+                    <div class="stat">
+                        <span class="stat-value" id="val-nodes">0</span>
+                        <span class="stat-label">Nodes</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-value" id="val-edges">0</span>
+                        <span class="stat-label">Edges</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ── Component Stress Panel ────────────────────────── -->
+        <section class="card" id="stress-panel">
+            <div class="card-header">
+                <h2>Component Stress</h2>
+                <span class="badge-muted">Top 10</span>
+            </div>
+            <div class="card-body">
+                <table class="stress-table" id="stress-table">
+                    <thead>
+                        <tr>
+                            <th class="sortable" data-key="name">Component</th>
+                            <th class="sortable" data-key="stress">Stress</th>
+                            <th class="sortable" data-key="coupling">Coupling</th>
+                            <th class="sortable" data-key="cohesion">Cohesion</th>
+                            <th class="sortable" data-key="cascade_depth">Cascade</th>
+                        </tr>
+                    </thead>
+                    <tbody id="stress-tbody">
+                        <tr><td colspan="5" class="empty-msg">Awaiting sweep data…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- ── Recent Changes Panel ──────────────────────────── -->
+        <section class="card" id="changes-panel">
+            <div class="card-header">
+                <h2>Recent Changes</h2>
+                <span class="badge-muted">Last 20</span>
+            </div>
+            <div class="card-body">
+                <table class="changes-table" id="changes-table">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Action</th>
+                            <th>Component</th>
+                            <th>Impact</th>
+                        </tr>
+                    </thead>
+                    <tbody id="changes-tbody">
+                        <tr><td colspan="4" class="empty-msg">No changes recorded</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- ── Health History Panel ──────────────────────────── -->
+        <section class="card" id="history-panel">
+            <div class="card-header">
+                <h2>Health History</h2>
+                <div class="history-controls">
+                    <button class="time-btn active" data-hours="1">1h</button>
+                    <button class="time-btn" data-hours="6">6h</button>
+                    <button class="time-btn" data-hours="24">24h</button>
+                    <button class="time-btn" data-hours="168">7d</button>
+                </div>
+            </div>
+            <div class="card-body chart-body">
+                <canvas id="es-chart"></canvas>
+                <div class="chart-overlay" id="chart-tooltip"></div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <span>Powered by <strong>NFET</strong> — Qira LLC</span>
+    </footer>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
