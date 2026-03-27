@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 from codey.saas.models.api_key import ApiKey
 from codey.saas.models.base import Base

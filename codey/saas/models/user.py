@@ -1,8 +1,7 @@
-from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import UUID
@@ -31,13 +30,13 @@ class User(Base):
     email: Mapped[str] = mapped_column(
         String(255), unique=True, nullable=False
     )
-    password_hash: Mapped[str | None] = mapped_column(String(255))
-    github_id: Mapped[str | None] = mapped_column(String(100))
-    github_token: Mapped[str | None] = mapped_column(Text)
-    google_id: Mapped[str | None] = mapped_column(String(100))
-    name: Mapped[str | None] = mapped_column(String(255))
-    avatar_url: Mapped[str | None] = mapped_column(Text)
-    stripe_customer_id: Mapped[str | None] = mapped_column(
+    password_hash: Mapped[Optional[str]] = mapped_column(String(255))
+    github_id: Mapped[Optional[str]] = mapped_column(String(100))
+    github_token: Mapped[Optional[str]] = mapped_column(Text)
+    google_id: Mapped[Optional[str]] = mapped_column(String(100))
+    name: Mapped[Optional[str]] = mapped_column(String(255))
+    avatar_url: Mapped[Optional[str]] = mapped_column(Text)
+    stripe_customer_id: Mapped[Optional[str]] = mapped_column(
         String(100), unique=True
     )
     plan: Mapped[str] = mapped_column(
@@ -46,8 +45,8 @@ class User(Base):
     plan_status: Mapped[str] = mapped_column(
         String(50), server_default=text("'active'"), default="active"
     )
-    subscription_id: Mapped[str | None] = mapped_column(String(100))
-    subscription_period_end: Mapped[datetime | None] = mapped_column()
+    subscription_id: Mapped[Optional[str]] = mapped_column(String(100))
+    subscription_period_end: Mapped[Optional[datetime]] = mapped_column()
     credits_remaining: Mapped[int] = mapped_column(
         Integer, server_default=text("10"), default=10
     )
@@ -60,18 +59,18 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(
         server_default=text("now()"), nullable=False
     )
-    last_active: Mapped[datetime | None] = mapped_column(
+    last_active: Mapped[Optional[datetime]] = mapped_column(
         server_default=text("now()")
     )
 
     # Relationships
-    credit_transactions: Mapped[list[CreditTransaction]] = relationship(
+    credit_transactions: Mapped[list["CreditTransaction"]] = relationship(
         "CreditTransaction", back_populates="user", lazy="selectin"
     )
-    coding_sessions: Mapped[list[CodingSession]] = relationship(
+    coding_sessions: Mapped[list["CodingSession"]] = relationship(
         "CodingSession", back_populates="user", lazy="selectin"
     )
-    repositories: Mapped[list[Repository]] = relationship(
+    repositories: Mapped[list["Repository"]] = relationship(
         "Repository", back_populates="user", lazy="selectin"
     )
 

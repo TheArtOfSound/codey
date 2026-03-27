@@ -1,8 +1,7 @@
-from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 
 from sqlalchemy import Boolean, Float, ForeignKey, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -29,21 +28,21 @@ class Repository(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
     )
-    github_repo_id: Mapped[int | None] = mapped_column(Integer)
-    full_name: Mapped[str | None] = mapped_column(String(255))
-    clone_url: Mapped[str | None] = mapped_column(Text)
-    default_branch: Mapped[str | None] = mapped_column(String(100))
-    language: Mapped[str | None] = mapped_column(String(100))
+    github_repo_id: Mapped[Optional[int]] = mapped_column(Integer)
+    full_name: Mapped[Optional[str]] = mapped_column(String(255))
+    clone_url: Mapped[Optional[str]] = mapped_column(Text)
+    default_branch: Mapped[Optional[str]] = mapped_column(String(100))
+    language: Mapped[Optional[str]] = mapped_column(String(100))
     autonomous_mode_enabled: Mapped[bool] = mapped_column(
         Boolean, server_default=text("false"), default=False
     )
-    autonomous_config: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
-    last_analyzed: Mapped[datetime | None] = mapped_column()
-    nfet_phase: Mapped[str | None] = mapped_column(String(20))
-    es_score: Mapped[float | None] = mapped_column(Float)
+    autonomous_config: Mapped[Optional[dict]] = mapped_column(JSONB)
+    last_analyzed: Mapped[Optional[datetime]] = mapped_column()
+    nfet_phase: Mapped[Optional[str]] = mapped_column(String(20))
+    es_score: Mapped[Optional[float]] = mapped_column(Float)
     created_at: Mapped[datetime] = mapped_column(
         server_default=text("now()"), nullable=False
     )
 
     # Relationships
-    user: Mapped[User] = relationship("User", back_populates="repositories")
+    user: Mapped["User"] = relationship("User", back_populates="repositories")

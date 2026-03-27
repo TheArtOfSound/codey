@@ -1,7 +1,7 @@
-from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Optional
 
 from sqlalchemy import Float, ForeignKey, Integer, text
 from sqlalchemy.dialects.postgresql import UUID
@@ -28,11 +28,11 @@ class SessionCost(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
     )
-    input_tokens: Mapped[int | None] = mapped_column(Integer)
-    output_tokens: Mapped[int | None] = mapped_column(Integer)
-    api_cost_usd: Mapped[float | None] = mapped_column(Float)
-    credits_charged: Mapped[int | None] = mapped_column(Integer)
-    margin_ratio: Mapped[float | None] = mapped_column(Float)
+    input_tokens: Mapped[Optional[int]] = mapped_column(Integer)
+    output_tokens: Mapped[Optional[int]] = mapped_column(Integer)
+    api_cost_usd: Mapped[Optional[float]] = mapped_column(Float)
+    credits_charged: Mapped[Optional[int]] = mapped_column(Integer)
+    margin_ratio: Mapped[Optional[float]] = mapped_column(Float)
     created_at: Mapped[datetime] = mapped_column(
         server_default=text("now()"), nullable=False
     )

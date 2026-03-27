@@ -1,8 +1,7 @@
-from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import ForeignKey, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import UUID
@@ -31,14 +30,14 @@ class CreditTransaction(Base):
     )
     amount: Mapped[int] = mapped_column(Integer, nullable=False)
     type: Mapped[str] = mapped_column(String(50), nullable=False)
-    description: Mapped[str | None] = mapped_column(Text)
-    stripe_payment_intent_id: Mapped[str | None] = mapped_column(String(100))
-    session_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    credits_before: Mapped[int | None] = mapped_column(Integer)
-    credits_after: Mapped[int | None] = mapped_column(Integer)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    stripe_payment_intent_id: Mapped[Optional[str]] = mapped_column(String(100))
+    session_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True))
+    credits_before: Mapped[Optional[int]] = mapped_column(Integer)
+    credits_after: Mapped[Optional[int]] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(
         server_default=text("now()"), nullable=False
     )
 
     # Relationships
-    user: Mapped[User] = relationship("User", back_populates="credit_transactions")
+    user: Mapped["User"] = relationship("User", back_populates="credit_transactions")

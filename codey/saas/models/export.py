@@ -1,8 +1,7 @@
-from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 
 from sqlalchemy import ForeignKey, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -11,8 +10,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from codey.saas.models.base import Base
 
 
-class MemoryUpdateLog(Base):
-    __tablename__ = "memory_update_logs"
+class Export(Base):
+    __tablename__ = "exports"
 
     # Remove inherited updated_at since schema doesn't include it
     updated_at: Mapped[None] = None  # type: ignore[assignment]
@@ -26,21 +25,23 @@ class MemoryUpdateLog(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
     )
-    session_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("coding_sessions.id"), nullable=True
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False
     )
-    update_type: Mapped[str] = mapped_column(
+    export_type: Mapped[str] = mapped_column(
         String(50), nullable=False
     )
-    field_updated: Mapped[str] = mapped_column(
-        String(100), nullable=False
+    destination: Mapped[Optional[str]] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(
+        String(50), server_default=text("'pending'"), default="pending"
     )
-    previous_value: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
-    new_value: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
-    extraction_confidence: Mapped[float | None] = mapped_column()
-    source_description: Mapped[str | None] = mapped_column(Text)
-    memory_version_before: Mapped[int | None] = mapped_column(Integer)
-    memory_version_after: Mapped[int | None] = mapped_column(Integer)
+    file_url: Mapped[Optional[str]] = mapped_column(Text)
+    file_size_bytes: Mapped[Optional[int]] = mapped_column(Integer)
+    metadata_: Mapped[Optional[dict]] = mapped_column(
+        "metadata", JSONB
+    )
+    error_message: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         server_default=text("now()"), nullable=False
     )
+    completed_at: Mapped[Optional[datetime]] = mapped_column()

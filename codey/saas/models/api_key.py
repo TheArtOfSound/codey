@@ -1,7 +1,7 @@
-from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Optional
 
 from sqlalchemy import ForeignKey, String, text
 from sqlalchemy.dialects.postgresql import UUID
@@ -25,11 +25,11 @@ class ApiKey(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
     )
-    name: Mapped[str | None] = mapped_column(String(255))
+    name: Mapped[Optional[str]] = mapped_column(String(255))
     key_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-    key_prefix: Mapped[str | None] = mapped_column(String(20))
-    last_used: Mapped[datetime | None] = mapped_column()
-    expires_at: Mapped[datetime | None] = mapped_column()
+    key_prefix: Mapped[Optional[str]] = mapped_column(String(20))
+    last_used: Mapped[Optional[datetime]] = mapped_column()
+    expires_at: Mapped[Optional[datetime]] = mapped_column()
     created_at: Mapped[datetime] = mapped_column(
         server_default=text("now()"), nullable=False
     )

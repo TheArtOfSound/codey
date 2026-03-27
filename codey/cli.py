@@ -177,7 +177,8 @@ def analyze(project_path: str, component: str | None):
         for fn in file_nodes:
             s = graph.stress_score(fn)
             file_stress.append((fn, s))
-        file_stress.sort(key=lambda x: x[1], reverse=True)
+        import math
+        file_stress.sort(key=lambda x: x[1] if math.isfinite(x[1]) else 1e9, reverse=True)
 
         table = Table(
             title=f"All Modules — {result.phase.name} Phase (ES={result.es_score:.3f})",
@@ -190,14 +191,23 @@ def analyze(project_path: str, component: str | None):
         table.add_column("Cohesion", justify="right")
         table.add_column("Cascade", justify="right")
 
+        import math
         for fn, s in file_stress[:30]:
+            node_data = graph._graph.nodes.get(fn, {})
+            fp = node_data.get("file_path", fn)
+            # Show path relative to project root
+            try:
+                display = str(Path(fp).relative_to(path))
+            except ValueError:
+                display = Path(fp).name if fp else fn[:12]
             scolor = "green" if s < 0.4 else "yellow" if s < 0.7 else "red"
-            c = graph.coupling_score(fn)
-            h = graph.cohesion_score(fn)
+            stress_str = f"{s:.3f}" if math.isfinite(s) else ">999"
+            c = graph.coupling_score(fp)
+            h = graph.cohesion_score(fp)
             d = graph.cascade_depth(fn)
             table.add_row(
-                fn, f"[{scolor}]{s:.3f}[/{scolor}]",
-                f"{c:.3f}", f"{h:.3f}", str(d),
+                display, f"[{scolor}]{stress_str}[/{scolor}]",
+                f"{c:.1f}", f"{h:.3f}", str(d),
             )
 
         console.print(table)

@@ -1,7 +1,7 @@
-from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Optional
 
 from sqlalchemy import ForeignKey, Integer, String, text
 from sqlalchemy.dialects.postgresql import UUID
@@ -25,7 +25,7 @@ class Referral(Base):
     referrer_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
     )
-    referred_id: Mapped[uuid.UUID | None] = mapped_column(
+    referred_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
     )
     status: Mapped[str] = mapped_column(
@@ -34,7 +34,7 @@ class Referral(Base):
     created_at: Mapped[datetime] = mapped_column(
         server_default=text("now()"), nullable=False
     )
-    converted_at: Mapped[datetime | None] = mapped_column()
+    converted_at: Mapped[Optional[datetime]] = mapped_column()
     credits_issued_referrer: Mapped[int] = mapped_column(
         Integer, server_default=text("0"), default=0
     )
