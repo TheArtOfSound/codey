@@ -3,431 +3,657 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Codey — Network-Aware Autonomous Coding Intelligence</title>
-    <meta name="description" content="The only coding AI that sees your entire codebase as a network. Built by Qira LLC.">
+    <title>Codey — The coding agent that understands your codebase</title>
+    <meta name="description" content="Codey analyzes your codebase as a living network. Every line it writes, it knows exactly where that line sits — and what breaking it would cost.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
-
         *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
         :root {
-            --bg: #0a0a0f;
-            --bg-card: #14141f;
-            --bg-card-hover: #1a1a2e;
-            --border: #2a2a3e;
-            --text: #e0e0e0;
-            --text-dim: #888;
-            --text-bright: #ffffff;
-            --green: #00ff88;
-            --green-dim: #00cc6a;
-            --red: #ff4444;
-            --yellow: #ffcc00;
-            --blue: #4488ff;
-            --purple: #aa66ff;
+            --bg-deep: #050a12;
+            --bg-surface: #0a1628;
+            --bg-raised: #111f38;
+            --border: #1e3a5f;
+            --blue-primary: #2563eb;
+            --blue-light: #60a5fa;
+            --blue-subtle: #1e3a5f;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --text-muted: #475569;
+            --green: #22c55e;
+            --yellow: #eab308;
+            --red: #ef4444;
+        }
+
+        ::selection {
+            background-color: rgba(37, 99, 235, 0.3);
+            color: var(--text-primary);
+        }
+
+        html {
+            scroll-behavior: smooth;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }
 
         body {
-            font-family: 'Inter', -apple-system, sans-serif;
-            background: var(--bg);
-            color: var(--text);
+            font-family: 'Inter', system-ui, sans-serif;
+            background: var(--bg-deep);
+            color: var(--text-primary);
             line-height: 1.6;
             overflow-x: hidden;
         }
 
-        /* Grid background */
+        /* ── Dot grid background ──────────────────────────────────── */
         body::before {
             content: '';
             position: fixed;
             top: 0; left: 0; right: 0; bottom: 0;
-            background-image:
-                linear-gradient(rgba(0,255,136,0.03) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(0,255,136,0.03) 1px, transparent 1px);
-            background-size: 60px 60px;
+            background-image: radial-gradient(circle, rgba(30, 58, 95, 0.3) 1px, transparent 1px);
+            background-size: 32px 32px;
             pointer-events: none;
             z-index: 0;
+            animation: dot-breathe 8s ease-in-out infinite;
         }
+
+        @keyframes dot-breathe {
+            0%, 100% { opacity: 0.4; }
+            50% { opacity: 0.7; }
+        }
+
+        /* ── Scrollbar ────────────────────────────────────────────── */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: var(--bg-deep); }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--blue-primary); }
+        * { scrollbar-width: thin; scrollbar-color: var(--border) var(--bg-deep); }
 
         .container { max-width: 1200px; margin: 0 auto; padding: 0 24px; position: relative; z-index: 1; }
 
-        /* NAV */
+        /* ── NAV ──────────────────────────────────────────────────── */
         nav {
-            position: sticky; top: 0; z-index: 100;
-            background: rgba(10,10,15,0.85);
-            backdrop-filter: blur(20px);
-            border-bottom: 1px solid var(--border);
+            position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+            background: transparent;
+            border-bottom: 1px solid transparent;
             padding: 16px 0;
+            transition: background-color 300ms ease, border-color 300ms ease;
         }
-        nav .container { display: flex; align-items: center; justify-content: space-between; }
-        .logo { font-size: 24px; font-weight: 900; letter-spacing: 4px; }
-        .logo span { color: var(--green); }
-        nav a { color: var(--text-dim); text-decoration: none; margin-left: 24px; font-size: 14px; font-weight: 500; transition: color 0.2s; }
-        nav a:hover { color: var(--green); }
+        nav.scrolled {
+            background: var(--bg-deep);
+            border-bottom-color: var(--border);
+        }
+        nav .container {
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        .logo {
+            font-size: 20px; font-weight: 700; letter-spacing: 0.02em;
+            color: var(--text-primary);
+            text-decoration: none;
+        }
+        .logo-bracket { color: var(--blue-light); }
+        .nav-center {
+            display: flex; align-items: center; gap: 32px;
+        }
+        .nav-center a {
+            color: var(--text-secondary); text-decoration: none; font-size: 14px; font-weight: 500;
+            transition: color 150ms ease;
+        }
+        .nav-center a:hover { color: var(--text-primary); }
+        .nav-right {
+            display: flex; align-items: center; gap: 12px;
+        }
+        .nav-signin {
+            color: var(--text-secondary); text-decoration: none; font-size: 14px; font-weight: 500;
+            padding: 8px 16px; border: none; background: none; cursor: pointer;
+            transition: color 150ms ease;
+        }
+        .nav-signin:hover { color: var(--text-primary); }
+        .nav-cta {
+            display: inline-flex; align-items: center; justify-content: center;
+            background: var(--blue-primary); color: #fff; font-size: 14px; font-weight: 600;
+            padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer;
+            text-decoration: none; transition: filter 150ms ease;
+        }
+        .nav-cta:hover { filter: brightness(1.15); }
 
-        /* HERO */
+        /* ── HERO ─────────────────────────────────────────────────── */
         .hero {
+            min-height: 100vh;
+            display: flex; align-items: center; justify-content: center;
             text-align: center;
-            padding: 80px 0 40px;
-            position: relative;
+            padding: 120px 0 80px;
+        }
+        .hero-inner {
+            max-width: 720px;
+        }
+        .hero-label {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-bottom: 24px;
         }
         .hero h1 {
-            font-size: clamp(36px, 5vw, 64px);
-            font-weight: 900;
+            font-size: 48px;
+            font-weight: 700;
             line-height: 1.1;
-            max-width: 900px;
-            margin: 0 auto 24px;
-            color: var(--text-bright);
-        }
-        .hero h1 em {
-            font-style: normal;
-            background: linear-gradient(135deg, var(--green), var(--blue));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-        .hero p {
-            font-size: 20px;
-            color: var(--text-dim);
-            max-width: 600px;
-            margin: 0 auto 40px;
-        }
-        .hero-badge {
-            display: inline-block;
-            background: rgba(0,255,136,0.1);
-            border: 1px solid rgba(0,255,136,0.3);
-            color: var(--green);
-            padding: 6px 16px;
-            border-radius: 100px;
-            font-size: 13px;
-            font-weight: 600;
+            color: var(--text-primary);
             margin-bottom: 24px;
-            letter-spacing: 1px;
         }
+        .hero-sub {
+            font-size: 18px;
+            font-weight: 400;
+            color: var(--text-secondary);
+            line-height: 1.6;
+            margin-bottom: 40px;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        .hero-ctas {
+            display: flex; align-items: center; justify-content: center; gap: 16px;
+            margin-bottom: 64px;
+        }
+        .btn-hero-primary {
+            display: inline-flex; align-items: center; justify-content: center;
+            background: var(--blue-primary); color: #fff;
+            font-size: 16px; font-weight: 600;
+            height: 48px; padding: 0 24px; border-radius: 12px;
+            border: none; cursor: pointer; text-decoration: none;
+            transition: filter 150ms ease, transform 80ms ease;
+        }
+        .btn-hero-primary:hover { filter: brightness(1.15); }
+        .btn-hero-primary:active { transform: scale(0.98); }
+        .btn-hero-ghost {
+            display: inline-flex; align-items: center; justify-content: center;
+            background: transparent; color: var(--text-secondary);
+            font-size: 16px; font-weight: 500;
+            height: 48px; padding: 0 24px; border-radius: 12px;
+            border: none; cursor: pointer; text-decoration: none;
+            transition: color 150ms ease;
+        }
+        .btn-hero-ghost:hover { color: var(--text-primary); }
 
-        .btn {
-            display: inline-block;
-            padding: 14px 36px;
-            border-radius: 8px;
-            font-weight: 600;
-            font-size: 16px;
-            text-decoration: none;
-            transition: all 0.3s;
-            cursor: pointer;
-            border: none;
-        }
-        .btn-primary {
-            background: var(--green);
-            color: #000;
-            box-shadow: 0 0 30px rgba(0,255,136,0.3);
-        }
-        .btn-primary:hover { box-shadow: 0 0 50px rgba(0,255,136,0.5); transform: translateY(-2px); }
-        .btn-secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
-        .btn-secondary:hover { border-color: var(--green); color: var(--green); }
-
-        /* NFET DEMO */
-        .demo-section { padding: 20px 0 40px; }
-        .demo-card {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 16px;
-            overflow: hidden;
-            max-width: 900px;
+        /* ── Terminal window ──────────────────────────────────────── */
+        .terminal-wrapper {
+            perspective: 1200px;
+            max-width: 680px;
             margin: 0 auto;
         }
-        .demo-header {
-            background: #1a1a28;
-            padding: 12px 20px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            border-bottom: 1px solid var(--border);
-        }
-        .demo-dot { width: 12px; height: 12px; border-radius: 50%; }
-        .demo-dot.r { background: #ff5f57; }
-        .demo-dot.y { background: #febc2e; }
-        .demo-dot.g { background: #28c840; }
-        .demo-title { color: var(--text-dim); font-size: 13px; margin-left: 12px; font-family: 'JetBrains Mono', monospace; }
-        .demo-body {
-            padding: 24px;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 14px;
-            line-height: 1.8;
-            min-height: 300px;
-        }
-        .demo-line { opacity: 0; animation: fadeIn 0.3s ease forwards; }
-        .demo-line .prompt { color: var(--green); }
-        .demo-line .cmd { color: var(--text-bright); }
-        .demo-line .dim { color: var(--text-dim); }
-        .demo-line .val { color: var(--yellow); }
-        .demo-line .ok { color: var(--green); }
-        .demo-line .warn { color: var(--yellow); }
-        .demo-line .err { color: var(--red); }
-
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
-
-        .phase-badge {
-            display: inline-block;
-            padding: 2px 10px;
-            border-radius: 4px;
-            font-size: 12px;
-            font-weight: 700;
-            letter-spacing: 1px;
-        }
-        .phase-ridge { background: rgba(0,255,136,0.2); color: var(--green); }
-        .phase-caution { background: rgba(255,204,0,0.2); color: var(--yellow); }
-
-        /* METRICS */
-        .metrics {
-            display: flex;
-            gap: 16px;
-            margin-top: 20px;
-            flex-wrap: wrap;
-        }
-        .metric {
-            background: rgba(0,255,136,0.05);
-            border: 1px solid rgba(0,255,136,0.15);
-            border-radius: 8px;
-            padding: 12px 20px;
-            flex: 1;
-            min-width: 120px;
-            text-align: center;
-        }
-        .metric-label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; }
-        .metric-value { font-size: 24px; font-weight: 700; color: var(--green); margin-top: 4px; }
-
-        /* FEATURES */
-        .features { padding: 60px 0; }
-        .features h2 { text-align: center; font-size: 36px; font-weight: 800; margin-bottom: 32px; color: var(--text-bright); }
-        .feature-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
-        .feature-card {
-            background: var(--bg-card);
+        .terminal {
+            background: var(--bg-surface);
             border: 1px solid var(--border);
             border-radius: 12px;
-            padding: 32px;
-            transition: all 0.3s;
+            overflow: hidden;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.8);
+            transform: rotateX(3deg) rotateY(-2deg);
+            transform-origin: center center;
         }
-        .feature-card:hover { border-color: var(--green); transform: translateY(-4px); box-shadow: 0 8px 30px rgba(0,0,0,0.3); }
-        .feature-icon { font-size: 32px; margin-bottom: 16px; }
-        .feature-card h3 { font-size: 20px; font-weight: 700; margin-bottom: 8px; color: var(--text-bright); }
-        .feature-card p { color: var(--text-dim); font-size: 15px; }
+        .terminal-chrome {
+            display: flex; align-items: center; gap: 8px;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .terminal-dot {
+            width: 10px; height: 10px; border-radius: 50%;
+            background: var(--text-muted);
+        }
+        .terminal-title {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-left: 8px;
+        }
+        .terminal-body {
+            padding: 20px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            line-height: 1.8;
+            min-height: 200px;
+        }
+        .terminal-line {
+            white-space: pre;
+            overflow: hidden;
+            opacity: 0;
+            animation: line-appear 0.3s ease forwards;
+        }
 
-        /* COMPARISON */
-        .comparison { padding: 60px 0; }
-        .comparison h2 { text-align: center; font-size: 36px; font-weight: 800; margin-bottom: 32px; color: var(--text-bright); }
+        @keyframes line-appear {
+            from { opacity: 0; transform: translateY(2px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Terminal syntax colors */
+        .t-keyword { color: var(--blue-light); }
+        .t-string { color: var(--green); }
+        .t-comment { color: var(--text-muted); }
+        .t-fn { color: var(--text-primary); }
+        .t-num { color: var(--blue-light); }
+
+        /* Typing cursor */
+        .typing-cursor {
+            display: inline-block;
+            width: 8px;
+            height: 16px;
+            background: var(--blue-light);
+            animation: blink-cursor 1s step-end infinite;
+            vertical-align: text-bottom;
+            margin-left: 2px;
+        }
+        @keyframes blink-cursor {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+
+        /* ── FEATURES ─────────────────────────────────────────────── */
+        .features { padding: 120px 0; }
+        .section-label {
+            text-align: center; font-size: 14px; font-weight: 600;
+            color: var(--blue-light); text-transform: uppercase;
+            letter-spacing: 0.1em; margin-bottom: 12px;
+        }
+        .section-title {
+            text-align: center; font-size: 32px; font-weight: 700;
+            color: var(--text-primary); margin-bottom: 48px;
+        }
+        .feature-grid {
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px;
+        }
+        .feature-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 32px;
+            transition: border-color 150ms ease, background-color 150ms ease;
+        }
+        .feature-card:hover {
+            border-color: var(--blue-primary);
+            background: var(--bg-raised);
+        }
+        .feature-icon {
+            width: 40px; height: 40px; margin-bottom: 20px;
+            color: var(--blue-light);
+        }
+        .feature-card h3 {
+            font-size: 18px; font-weight: 600;
+            color: var(--text-primary); margin-bottom: 8px;
+        }
+        .feature-card p {
+            font-size: 14px; color: var(--text-secondary); line-height: 1.6;
+        }
+
+        /* ── PRICING ──────────────────────────────────────────────── */
+        .pricing { padding: 120px 0; }
+        .price-grid {
+            display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px;
+            max-width: 1100px; margin: 0 auto;
+        }
+        .price-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 32px 24px;
+            position: relative;
+            display: flex; flex-direction: column;
+        }
+        .price-card.pro {
+            border-left: 3px solid var(--blue-primary);
+        }
+        .popular-pill {
+            position: absolute;
+            top: -12px; left: 50%; transform: translateX(-50%);
+            background: var(--blue-subtle);
+            color: var(--blue-light);
+            font-size: 11px; font-weight: 600;
+            padding: 4px 12px; border-radius: 9999px;
+            letter-spacing: 0.05em;
+        }
+        .plan-name {
+            font-size: 14px; font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 12px;
+        }
+        .plan-price {
+            font-size: 48px; font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+        .plan-price .period {
+            font-size: 16px; font-weight: 400;
+            color: var(--text-muted);
+        }
+        .plan-desc {
+            font-size: 14px; color: var(--text-secondary);
+            margin-bottom: 24px;
+        }
+        .plan-features {
+            list-style: none;
+            margin-bottom: 32px;
+            flex: 1;
+        }
+        .plan-features li {
+            font-size: 14px; color: var(--text-secondary);
+            padding: 6px 0;
+            display: flex; align-items: flex-start; gap: 8px;
+        }
+        .plan-features .check {
+            color: #fff; font-weight: 700; flex-shrink: 0;
+        }
+        .plan-features .dash {
+            color: var(--text-muted); flex-shrink: 0;
+        }
+        .btn-plan-primary {
+            display: block; width: 100%; text-align: center;
+            background: var(--blue-primary); color: #fff;
+            font-size: 14px; font-weight: 600;
+            padding: 10px 16px; border-radius: 6px;
+            border: none; cursor: pointer; text-decoration: none;
+            transition: filter 150ms ease;
+        }
+        .btn-plan-primary:hover { filter: brightness(1.15); }
+        .btn-plan-secondary {
+            display: block; width: 100%; text-align: center;
+            background: transparent; color: var(--text-primary);
+            font-size: 14px; font-weight: 600;
+            padding: 10px 16px; border-radius: 6px;
+            border: 1px solid var(--border); cursor: pointer; text-decoration: none;
+            transition: border-color 150ms ease, background-color 150ms ease;
+        }
+        .btn-plan-secondary:hover {
+            border-color: var(--blue-primary);
+            background: var(--bg-raised);
+        }
+
+        /* ── COMPARISON ───────────────────────────────────────────── */
+        .comparison { padding: 0 0 120px; }
         .comp-table {
             width: 100%;
             border-collapse: collapse;
-            background: var(--bg-card);
-            border-radius: 12px;
+            background: var(--bg-surface);
+            border-radius: 8px;
             overflow: hidden;
             border: 1px solid var(--border);
         }
-        .comp-table th, .comp-table td { padding: 14px 20px; text-align: center; border-bottom: 1px solid var(--border); font-size: 14px; }
-        .comp-table th { background: #1a1a28; color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: 1px; font-size: 12px; }
-        .comp-table td:first-child { text-align: left; font-weight: 500; color: var(--text-bright); }
-        .comp-table tr:last-child td { border-bottom: none; }
-        .check { color: var(--green); font-weight: 700; }
-        .cross { color: var(--text-dim); }
-        .comp-table th:last-child, .comp-table td:last-child { background: rgba(0,255,136,0.05); }
-
-        /* PRICING */
-        .pricing { padding: 60px 0; }
-        .pricing h2 { text-align: center; font-size: 36px; font-weight: 800; margin-bottom: 12px; color: var(--text-bright); }
-        .pricing-sub { text-align: center; color: var(--text-dim); margin-bottom: 32px; font-size: 18px; }
-        .price-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
-        .price-card {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 28px 24px;
-            position: relative;
-            transition: all 0.3s;
-            overflow: visible;
-        }
-        .price-card.popular { border-color: var(--green); box-shadow: 0 0 30px rgba(0,255,136,0.1); }
-        .popular-tag {
-            position: absolute;
-            top: -12px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: var(--green);
-            color: #000;
-            padding: 4px 16px;
-            border-radius: 100px;
-            font-size: 12px;
-            font-weight: 700;
-        }
-        .price-name { font-size: 20px; font-weight: 700; color: var(--text-bright); }
-        .price-amount { font-size: 48px; font-weight: 900; color: var(--text-bright); margin: 16px 0 4px; }
-        .price-amount span { font-size: 16px; font-weight: 400; color: var(--text-dim); }
-        .price-credits { color: var(--green); font-weight: 600; margin-bottom: 20px; }
-        .price-features { list-style: none; margin-bottom: 24px; }
-        .price-features li { padding: 6px 0; color: var(--text-dim); font-size: 14px; }
-        .price-features li::before { content: "\2713"; color: var(--green); margin-right: 8px; font-weight: 700; }
-
-        /* CTA */
-        .cta-section {
+        .comp-table th, .comp-table td {
+            padding: 14px 20px;
             text-align: center;
-            padding: 70px 0;
-            background: linear-gradient(180deg, transparent, rgba(0,255,136,0.03));
+            border-bottom: 1px solid var(--border);
+            font-size: 14px;
         }
-        .cta-section h2 { font-size: 42px; font-weight: 900; margin-bottom: 16px; color: var(--text-bright); }
-        .cta-section p { color: var(--text-dim); font-size: 18px; margin-bottom: 32px; }
+        .comp-table th {
+            background: var(--bg-raised);
+            color: var(--text-secondary);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-size: 12px;
+        }
+        .comp-table td:first-child {
+            text-align: left; font-weight: 500; color: var(--text-primary);
+        }
+        .comp-table tr:last-child td { border-bottom: none; }
+        .comp-check { color: var(--green); font-weight: 700; }
+        .comp-x { color: var(--text-muted); }
+        /* Codey column highlight */
+        .comp-table th:last-child,
+        .comp-table td:last-child {
+            background: rgba(30, 58, 95, 0.3);
+        }
 
-        /* FOOTER */
+        /* ── FOOTER ───────────────────────────────────────────────── */
         footer {
             border-top: 1px solid var(--border);
-            padding: 40px 0;
-            text-align: center;
+            padding: 64px 0 32px;
         }
-        footer .container { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }
-        .footer-brand { color: var(--text-dim); font-size: 14px; }
-        .footer-brand strong { color: var(--green); font-weight: 600; }
-        .footer-links a { color: var(--text-dim); text-decoration: none; margin-left: 20px; font-size: 13px; }
-        .footer-links a:hover { color: var(--green); }
+        .footer-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr 1fr 1fr;
+            gap: 48px;
+            margin-bottom: 48px;
+        }
+        .footer-brand-col .footer-logo {
+            font-size: 20px; font-weight: 700; margin-bottom: 12px;
+            color: var(--text-primary);
+        }
+        .footer-brand-col .footer-logo .logo-bracket { color: var(--blue-light); }
+        .footer-brand-col p {
+            font-size: 14px; color: var(--text-secondary); line-height: 1.6;
+        }
+        .footer-col h4 {
+            font-size: 12px; font-weight: 600; color: var(--text-secondary);
+            text-transform: uppercase; letter-spacing: 0.1em;
+            margin-bottom: 16px;
+        }
+        .footer-col a {
+            display: block; font-size: 14px; color: var(--text-secondary);
+            text-decoration: none; padding: 4px 0;
+            transition: color 150ms ease;
+        }
+        .footer-col a:hover { color: var(--text-primary); }
+        .footer-bottom {
+            display: flex; justify-content: space-between; align-items: center;
+            padding-top: 24px;
+            border-top: 1px solid var(--border);
+        }
+        .footer-bottom span {
+            font-size: 13px; color: var(--text-muted);
+        }
 
-        /* RESPONSIVE */
+        /* ── Animations ───────────────────────────────────────────── */
+        @keyframes fade-in {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .fade-up {
+            opacity: 0;
+            transform: translateY(16px);
+            transition: opacity 0.5s ease, transform 0.5s ease;
+        }
+        .fade-up.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        /* ── Responsive ───────────────────────────────────────────── */
         @media (max-width: 1024px) {
             .feature-grid { grid-template-columns: repeat(2, 1fr); }
             .price-grid { grid-template-columns: repeat(2, 1fr); }
-            .price-amount { font-size: 36px; }
+            .footer-grid { grid-template-columns: 1fr 1fr; gap: 32px; }
         }
         @media (max-width: 768px) {
-            .hero { padding: 60px 0 40px; }
-            .hero h1 { font-size: 28px; }
-            .hero p { font-size: 16px; }
+            .hero h1 { font-size: 32px; }
+            .hero-sub { font-size: 16px; }
+            .hero-ctas { flex-direction: column; }
             .feature-grid { grid-template-columns: 1fr; }
             .price-grid { grid-template-columns: 1fr; max-width: 400px; margin: 0 auto; }
-            .comp-table { font-size: 11px; }
-            .comp-table th, .comp-table td { padding: 8px 6px; }
-            nav .nav-links { display: none; }
-            .cta-section h2 { font-size: 28px; }
-            .cta-section { padding: 60px 0; }
-            footer .container { flex-direction: column; text-align: center; }
-            .footer-links a { margin: 0 10px; }
-            .metrics { flex-direction: column; }
+            .plan-price { font-size: 36px; }
+            .comp-table { font-size: 12px; }
+            .comp-table th, .comp-table td { padding: 10px 8px; }
+            .nav-center { display: none; }
+            .footer-grid { grid-template-columns: 1fr; gap: 24px; }
+            .footer-bottom { flex-direction: column; gap: 8px; text-align: center; }
+            .terminal { transform: none; }
         }
-
-        /* Animations */
-        .fade-up { opacity: 0; transform: translateY(20px); transition: all 0.6s ease; }
-        .fade-up.visible { opacity: 1; transform: translateY(0); }
     </style>
 </head>
 <body>
 
-<nav>
+<!-- NAV -->
+<nav id="nav">
     <div class="container">
-        <div class="logo"><span>C</span>ODEY</div>
-        <div class="nav-links">
+        <a href="/" class="logo"><span class="logo-bracket">[</span>ODEY</a>
+        <div class="nav-center">
             <a href="#features">Features</a>
-            <a href="#comparison">Compare</a>
             <a href="#pricing">Pricing</a>
-            <a href="https://github.com/TheArtOfSound/codey" target="_blank">GitHub</a>
+            <a href="/docs">Docs</a>
+            <a href="/changelog">Changelog</a>
+        </div>
+        <div class="nav-right">
+            <a href="/signin" class="nav-signin">Sign in</a>
+            <a href="/signup" class="nav-cta">Start building — free</a>
         </div>
     </div>
 </nav>
 
+<!-- HERO -->
 <section class="hero">
     <div class="container">
-        <div class="hero-badge">STRUCTURAL INTELLIGENCE</div>
-        <h1>The only coding AI that sees your entire codebase as a <em>network</em></h1>
-        <p>Codey maps your codebase topology, predicts cascade failures before they happen, and writes code that keeps your system structurally healthy.</p>
-        <a href="#pricing" class="btn btn-primary">Start for free</a>
-        <a href="https://github.com/TheArtOfSound/codey" class="btn btn-secondary" style="margin-left: 12px;">View on GitHub</a>
-    </div>
-</section>
-
-<section class="demo-section">
-    <div class="container">
-        <div class="demo-card">
-            <div class="demo-header">
-                <div class="demo-dot r"></div>
-                <div class="demo-dot y"></div>
-                <div class="demo-dot g"></div>
-                <span class="demo-title">codey scan ~/projects/api-service</span>
+        <div class="hero-inner">
+            <div class="hero-label">// The structural coding agent</div>
+            <h1>Code that understands<br>what it's building.</h1>
+            <p class="hero-sub">Codey analyzes your codebase as a living network. Every line it writes, it knows exactly where that line sits — and what breaking it would cost.</p>
+            <div class="hero-ctas">
+                <a href="/signup" class="btn-hero-primary">Start building — free</a>
+                <a href="#features" class="btn-hero-ghost">See how it works &#8594;</a>
             </div>
-            <div class="demo-body" id="demo">
-                <div class="demo-line" style="animation-delay: 0.2s"><span class="prompt">$</span> <span class="cmd">codey scan ~/projects/api-service</span></div>
-                <div class="demo-line" style="animation-delay: 0.6s"><span class="dim">Scanning /projects/api-service ...</span></div>
-                <div class="demo-line" style="animation-delay: 1.0s"><span class="dim">  847 nodes, 1,203 edges in 0.14s</span></div>
-                <div class="demo-line" style="animation-delay: 1.6s"><br></div>
-                <div class="demo-line" style="animation-delay: 2.0s"><span class="dim">Health: </span><span class="phase-badge phase-caution">Watch</span></div>
-                <div class="demo-line" style="animation-delay: 2.4s"><span class="dim">Health Score: </span><span class="val">0.583</span></div>
-                <div class="demo-line" style="animation-delay: 2.8s"><span class="dim">Coupling: </span><span class="val">0.487</span>  <span class="dim">Stability: </span><span class="val">0.218</span></div>
-                <div class="demo-line" style="animation-delay: 3.2s"><br></div>
-                <div class="demo-line" style="animation-delay: 3.6s"><span class="warn">Highest-Stress Components:</span></div>
-                <div class="demo-line" style="animation-delay: 4.0s">  <span class="err">AuthService</span>     <span class="dim">complexity=</span><span class="err">0.84</span>  <span class="dim">impact_radius=</span><span class="val">31</span></div>
-                <div class="demo-line" style="animation-delay: 4.4s">  <span class="warn">PaymentHandler</span>  <span class="dim">complexity=</span><span class="warn">0.71</span>  <span class="dim">impact_radius=</span><span class="val">23</span></div>
-                <div class="demo-line" style="animation-delay: 4.8s">  <span class="ok">UserModel</span>       <span class="dim">complexity=</span><span class="ok">0.38</span>  <span class="dim">impact_radius=</span><span class="val">12</span></div>
-                <div class="demo-line" style="animation-delay: 5.4s"><br></div>
-                <div class="demo-line" style="animation-delay: 5.8s"><span class="warn">Warning:</span> <span class="dim">AuthService is 16% from stability limit.</span></div>
-                <div class="demo-line" style="animation-delay: 6.2s"><span class="dim">Refactoring would move codebase from Watch to Healthy.</span></div>
-            </div>
-            <div class="metrics">
-                <div class="metric">
-                    <div class="metric-label">Nodes</div>
-                    <div class="metric-value">847</div>
-                </div>
-                <div class="metric">
-                    <div class="metric-label">Edges</div>
-                    <div class="metric-value">1,203</div>
-                </div>
-                <div class="metric">
-                    <div class="metric-label">Health</div>
-                    <div class="metric-value" style="color: var(--yellow);">0.583</div>
-                </div>
-                <div class="metric">
-                    <div class="metric-label">Status</div>
-                    <div class="metric-value" style="color: var(--yellow); font-size: 18px;">Watch</div>
+            <div class="terminal-wrapper">
+                <div class="terminal">
+                    <div class="terminal-chrome">
+                        <div class="terminal-dot"></div>
+                        <div class="terminal-dot"></div>
+                        <div class="terminal-dot"></div>
+                        <span class="terminal-title">codey — main.py</span>
+                    </div>
+                    <div class="terminal-body" id="terminal-code">
+                        <div class="terminal-line" style="animation-delay:0.2s"><span class="t-keyword">from</span> <span class="t-fn">fastapi</span> <span class="t-keyword">import</span> <span class="t-fn">FastAPI</span>, <span class="t-fn">HTTPException</span></div>
+                        <div class="terminal-line" style="animation-delay:0.5s"><span class="t-keyword">from</span> <span class="t-fn">app.models</span> <span class="t-keyword">import</span> <span class="t-fn">User</span>, <span class="t-fn">Project</span></div>
+                        <div class="terminal-line" style="animation-delay:0.8s"></div>
+                        <div class="terminal-line" style="animation-delay:1.1s"><span class="t-fn">app</span> = <span class="t-fn">FastAPI</span>()</div>
+                        <div class="terminal-line" style="animation-delay:1.4s"></div>
+                        <div class="terminal-line" style="animation-delay:1.7s"><span class="t-comment"># Codey: This endpoint has 12 dependents.</span></div>
+                        <div class="terminal-line" style="animation-delay:2.0s"><span class="t-comment"># Impact radius: 34 nodes. Proceed carefully.</span></div>
+                        <div class="terminal-line" style="animation-delay:2.3s"><span class="t-keyword">@app</span>.<span class="t-fn">get</span>(<span class="t-string">"/api/projects/{project_id}"</span>)</div>
+                        <div class="terminal-line" style="animation-delay:2.6s"><span class="t-keyword">async def</span> <span class="t-fn">get_project</span>(project_id: <span class="t-fn">str</span>):</div>
+                        <div class="terminal-line" style="animation-delay:2.9s">    project = <span class="t-keyword">await</span> <span class="t-fn">Project</span>.<span class="t-fn">get</span>(project_id)</div>
+                        <div class="terminal-line" style="animation-delay:3.2s">    <span class="t-keyword">if not</span> project:</div>
+                        <div class="terminal-line" style="animation-delay:3.5s">        <span class="t-keyword">raise</span> <span class="t-fn">HTTPException</span>(<span class="t-num">404</span>)</div>
+                        <div class="terminal-line" style="animation-delay:3.8s">    <span class="t-keyword">return</span> project.<span class="t-fn">to_dict</span>()<span class="typing-cursor"></span></div>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 </section>
 
+<!-- FEATURES -->
 <section class="features" id="features">
     <div class="container">
-        <h2>What No Other Coding AI Does</h2>
+        <div class="section-label">Capabilities</div>
+        <h2 class="section-title">What makes Codey different</h2>
         <div class="feature-grid">
-            <div class="feature-card">
-                <div class="feature-icon">&#x1f578;</div>
-                <h3>Network-Aware Generation</h3>
-                <p>Every line of code is evaluated for its impact on the dependency graph. Codey writes code that keeps your codebase in its optimal zone.</p>
+            <div class="feature-card fade-up">
+                <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
+                </svg>
+                <h3>Understands structure</h3>
+                <p>Codey maps your codebase before making any change. It sees every dependency, every import chain, every fragile coupling.</p>
             </div>
-            <div class="feature-card">
-                <div class="feature-icon">&#x1f6e1;</div>
-                <h3>Collapse Prediction</h3>
-                <p>Codey's structural intelligence detects when components are approaching failure — before it happens. Real-time analysis across your entire dependency graph.</p>
+            <div class="feature-card fade-up">
+                <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="2" y="3" width="20" height="14" rx="2"/>
+                    <path d="M8 21h8M12 17v4"/>
+                    <path d="M7 8l3 3-3 3M12 14h4"/>
+                </svg>
+                <h3>Builds complete projects</h3>
+                <p>Describe what you need. Get a complete, running app. Codey scaffolds structure, writes logic, and connects every piece.</p>
             </div>
-            <div class="feature-card">
-                <div class="feature-icon">&#x1f916;</div>
-                <h3>Autonomous Mode</h3>
-                <p>Codey monitors your repo 24/7. Refactors high-stress components, fixes lint, generates tests — all within boundaries you configure.</p>
-            </div>
-            <div class="feature-card">
-                <div class="feature-icon">&#x1f9e0;</div>
-                <h3>Personal Memory</h3>
-                <p>Your Codey learns your coding style, preferences, and project context. After a month, it writes code the way you would write it.</p>
-            </div>
-            <div class="feature-card">
-                <div class="feature-icon">&#x1f4ca;</div>
-                <h3>Structural Dashboard</h3>
-                <p>Real-time health monitoring. See coupling, stability, health scores, and complexity levels across your entire codebase at a glance.</p>
-            </div>
-            <div class="feature-card">
-                <div class="feature-icon">&#x1f512;</div>
-                <h3>Military-Grade Security</h3>
-                <p>AES-256 encryption, Row Level Security, audit logging, rate limiting. Your code never touches another user's data.</p>
+            <div class="feature-card fade-up">
+                <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M12 6v6l4 2"/>
+                </svg>
+                <h3>Works while you sleep</h3>
+                <p>Connect your repo. Codey monitors and improves it. Refactors drift, fixes lint, generates tests -- all within your configured boundaries.</p>
             </div>
         </div>
     </div>
 </section>
 
+<!-- PRICING -->
+<section class="pricing" id="pricing">
+    <div class="container">
+        <div class="section-label">Pricing</div>
+        <h2 class="section-title">Simple, honest pricing</h2>
+        <div class="price-grid">
+            <!-- Free -->
+            <div class="price-card fade-up">
+                <div class="plan-name">Free</div>
+                <div class="plan-price">$0<span class="period">/month</span></div>
+                <div class="plan-desc">10 credits/month</div>
+                <ul class="plan-features">
+                    <li><span class="check">&#10003;</span> Prompt mode</li>
+                    <li><span class="check">&#10003;</span> Basic structural analysis</li>
+                    <li><span class="check">&#10003;</span> 5MB upload limit</li>
+                    <li><span class="check">&#10003;</span> Community support</li>
+                    <li><span class="dash">&#8212;</span> Autonomous mode</li>
+                    <li><span class="dash">&#8212;</span> API access</li>
+                </ul>
+                <a href="/signup" class="btn-plan-secondary">Get started</a>
+            </div>
+            <!-- Starter -->
+            <div class="price-card fade-up">
+                <div class="plan-name">Starter</div>
+                <div class="plan-price">$19<span class="period">/month</span></div>
+                <div class="plan-desc">100 credits/month</div>
+                <ul class="plan-features">
+                    <li><span class="check">&#10003;</span> Everything in Free</li>
+                    <li><span class="check">&#10003;</span> Full structural analysis</li>
+                    <li><span class="check">&#10003;</span> 1 GitHub repo</li>
+                    <li><span class="check">&#10003;</span> 50MB upload limit</li>
+                    <li><span class="check">&#10003;</span> Email support</li>
+                    <li><span class="dash">&#8212;</span> Autonomous mode</li>
+                </ul>
+                <a href="/signup?plan=starter" class="btn-plan-secondary">Subscribe</a>
+            </div>
+            <!-- Pro -->
+            <div class="price-card pro fade-up">
+                <div class="popular-pill">Most popular</div>
+                <div class="plan-name">Pro</div>
+                <div class="plan-price">$49<span class="period">/month</span></div>
+                <div class="plan-desc">400 credits/month</div>
+                <ul class="plan-features">
+                    <li><span class="check">&#10003;</span> Everything in Starter</li>
+                    <li><span class="check">&#10003;</span> Autonomous mode</li>
+                    <li><span class="check">&#10003;</span> 5 GitHub repos</li>
+                    <li><span class="check">&#10003;</span> 500MB upload limit</li>
+                    <li><span class="check">&#10003;</span> Priority processing</li>
+                    <li><span class="check">&#10003;</span> API access</li>
+                </ul>
+                <a href="/signup?plan=pro" class="btn-plan-primary">Subscribe</a>
+            </div>
+            <!-- Team -->
+            <div class="price-card fade-up">
+                <div class="plan-name">Team</div>
+                <div class="plan-price">$149<span class="period">/month</span></div>
+                <div class="plan-desc">1,500 credits/month</div>
+                <ul class="plan-features">
+                    <li><span class="check">&#10003;</span> Everything in Pro</li>
+                    <li><span class="check">&#10003;</span> Unlimited repos</li>
+                    <li><span class="check">&#10003;</span> Up to 10 seats</li>
+                    <li><span class="check">&#10003;</span> 2GB upload limit</li>
+                    <li><span class="check">&#10003;</span> Priority support</li>
+                    <li><span class="check">&#10003;</span> Custom integrations</li>
+                </ul>
+                <a href="/signup?plan=team" class="btn-plan-secondary">Subscribe</a>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- COMPARISON -->
 <section class="comparison" id="comparison">
     <div class="container">
-        <h2>Codey vs The Rest</h2>
+        <div class="section-label">Comparison</div>
+        <h2 class="section-title">Codey vs the rest</h2>
         <table class="comp-table">
             <thead>
                 <tr>
-                    <th>Capability</th>
+                    <th style="text-align:left">Capability</th>
                     <th>Copilot</th>
                     <th>Cursor</th>
                     <th>Claude Code</th>
@@ -435,114 +661,78 @@
                 </tr>
             </thead>
             <tbody>
-                <tr><td>Code generation</td><td class="check">&#10003;</td><td class="check">&#10003;</td><td class="check">&#10003;</td><td class="check">&#10003;</td></tr>
-                <tr><td>Multi-file editing</td><td class="cross">Limited</td><td class="check">&#10003;</td><td class="check">&#10003;</td><td class="check">&#10003; Atomic</td></tr>
-                <tr><td>Dependency graph model</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="check">&#10003;</td></tr>
-                <tr><td>Structural stress analysis</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="check">&#10003;</td></tr>
-                <tr><td>Collapse prediction</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="check">&#10003;</td></tr>
-                <tr><td>Cascade simulation</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="check">&#10003;</td></tr>
-                <tr><td>Structural optimization</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="check">&#10003;</td></tr>
-                <tr><td>Autonomous proactive mode</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="cross">Limited</td><td class="check">&#10003; Full</td></tr>
-                <tr><td>Structural health dashboard</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="check">&#10003;</td></tr>
-                <tr><td>Personal memory system</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="check">&#10003;</td></tr>
+                <tr><td>Code generation</td><td class="comp-check">&#10003;</td><td class="comp-check">&#10003;</td><td class="comp-check">&#10003;</td><td class="comp-check">&#10003;</td></tr>
+                <tr><td>Multi-file editing</td><td class="comp-x">Limited</td><td class="comp-check">&#10003;</td><td class="comp-check">&#10003;</td><td class="comp-check">&#10003;</td></tr>
+                <tr><td>Dependency graph model</td><td class="comp-x">&#8212;</td><td class="comp-x">&#8212;</td><td class="comp-x">&#8212;</td><td class="comp-check">&#10003;</td></tr>
+                <tr><td>Structural stress analysis</td><td class="comp-x">&#8212;</td><td class="comp-x">&#8212;</td><td class="comp-x">&#8212;</td><td class="comp-check">&#10003;</td></tr>
+                <tr><td>Collapse prediction</td><td class="comp-x">&#8212;</td><td class="comp-x">&#8212;</td><td class="comp-x">&#8212;</td><td class="comp-check">&#10003;</td></tr>
+                <tr><td>Cascade simulation</td><td class="comp-x">&#8212;</td><td class="comp-x">&#8212;</td><td class="comp-x">&#8212;</td><td class="comp-check">&#10003;</td></tr>
+                <tr><td>Autonomous proactive mode</td><td class="comp-x">&#8212;</td><td class="comp-x">&#8212;</td><td class="comp-x">Limited</td><td class="comp-check">&#10003;</td></tr>
+                <tr><td>Structural health dashboard</td><td class="comp-x">&#8212;</td><td class="comp-x">&#8212;</td><td class="comp-x">&#8212;</td><td class="comp-check">&#10003;</td></tr>
+                <tr><td>Personal memory system</td><td class="comp-x">&#8212;</td><td class="comp-x">&#8212;</td><td class="comp-x">&#8212;</td><td class="comp-check">&#10003;</td></tr>
             </tbody>
         </table>
     </div>
 </section>
 
-<section class="pricing" id="pricing">
-    <div class="container">
-        <h2>Simple, Honest Pricing</h2>
-        <p class="pricing-sub">Start free. Scale as you build.</p>
-        <div class="price-grid">
-            <div class="price-card">
-                <div class="price-name">Free</div>
-                <div class="price-amount">$0<span>/mo</span></div>
-                <div class="price-credits">10 credits/month</div>
-                <ul class="price-features">
-                    <li>Prompt mode</li>
-                    <li>Basic structural analysis</li>
-                    <li>5MB upload limit</li>
-                    <li>Community support</li>
-                </ul>
-                <a href="#" class="btn btn-secondary" style="width: 100%; text-align: center;">Get started</a>
-            </div>
-            <div class="price-card">
-                <div class="price-name">Starter</div>
-                <div class="price-amount">$19<span>/mo</span></div>
-                <div class="price-credits">100 credits/month</div>
-                <ul class="price-features">
-                    <li>Everything in Free</li>
-                    <li>Full structural analysis</li>
-                    <li>1 GitHub repo</li>
-                    <li>50MB upload limit</li>
-                    <li>Email support</li>
-                </ul>
-                <a href="#" class="btn btn-secondary" style="width: 100%; text-align: center;">Subscribe</a>
-            </div>
-            <div class="price-card popular">
-                <div class="popular-tag">MOST POPULAR</div>
-                <div class="price-name">Pro</div>
-                <div class="price-amount">$49<span>/mo</span></div>
-                <div class="price-credits">400 credits/month</div>
-                <ul class="price-features">
-                    <li>Everything in Starter</li>
-                    <li>Autonomous mode</li>
-                    <li>5 GitHub repos</li>
-                    <li>500MB upload limit</li>
-                    <li>Priority processing</li>
-                    <li>API access</li>
-                </ul>
-                <a href="#" class="btn btn-primary" style="width: 100%; text-align: center;">Subscribe</a>
-            </div>
-            <div class="price-card">
-                <div class="price-name">Team</div>
-                <div class="price-amount">$149<span>/mo</span></div>
-                <div class="price-credits">1,500 credits/month</div>
-                <ul class="price-features">
-                    <li>Everything in Pro</li>
-                    <li>Unlimited repos</li>
-                    <li>Up to 10 seats</li>
-                    <li>2GB upload limit</li>
-                    <li>Priority support</li>
-                </ul>
-                <a href="#" class="btn btn-secondary" style="width: 100%; text-align: center;">Subscribe</a>
-            </div>
-        </div>
-    </div>
-</section>
-
-<section class="cta-section">
-    <div class="container">
-        <h2>Your codebase is a network.<br>Start seeing it that way.</h2>
-        <p>10 free credits. No credit card required.</p>
-        <a href="#" class="btn btn-primary">Start building with Codey</a>
-    </div>
-</section>
-
+<!-- FOOTER -->
 <footer>
     <div class="container">
-        <div class="footer-brand"><strong>Codey</strong> &mdash; Qira LLC &copy; 2026</div>
-        <div class="footer-links">
-            <a href="https://github.com/TheArtOfSound/codey">GitHub</a>
-            <a href="#">Docs</a>
-            <a href="#">Changelog</a>
-            <a href="#">Terms</a>
-            <a href="#">Privacy</a>
-            <a href="mailto:bryan@qira.ai">Contact</a>
+        <div class="footer-grid">
+            <div class="footer-brand-col">
+                <div class="footer-logo"><span class="logo-bracket">[</span>ODEY</div>
+                <p>Built by Qira LLC &middot; Phoenix, Arizona</p>
+            </div>
+            <div class="footer-col">
+                <h4>Product</h4>
+                <a href="#features">Features</a>
+                <a href="#pricing">Pricing</a>
+                <a href="/docs">Docs</a>
+                <a href="/changelog">Changelog</a>
+            </div>
+            <div class="footer-col">
+                <h4>Company</h4>
+                <a href="/about">About</a>
+                <a href="/blog">Blog</a>
+                <a href="mailto:bryan@qira.ai">Contact</a>
+            </div>
+            <div class="footer-col">
+                <h4>Legal</h4>
+                <a href="/terms">Terms</a>
+                <a href="/privacy">Privacy</a>
+            </div>
+            <div class="footer-col">
+                <h4>Social</h4>
+                <a href="https://github.com/TheArtOfSound/codey" target="_blank" rel="noopener">GitHub</a>
+                <a href="https://x.com/qirahq" target="_blank" rel="noopener">X / Twitter</a>
+            </div>
+        </div>
+        <div class="footer-bottom">
+            <span>&copy; 2026 Qira LLC</span>
+            <span>Built with craft.</span>
         </div>
     </div>
 </footer>
 
 <script>
+    // Nav scroll behavior
+    const nav = document.getElementById('nav');
+    window.addEventListener('scroll', () => {
+        if (window.scrollY > 10) {
+            nav.classList.add('scrolled');
+        } else {
+            nav.classList.remove('scrolled');
+        }
+    });
+
     // Intersection observer for fade-up animations
     const observer = new IntersectionObserver((entries) => {
-        entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+        entries.forEach(e => {
+            if (e.isIntersecting) e.target.classList.add('visible');
+        });
     }, { threshold: 0.1 });
-    document.querySelectorAll('.feature-card, .price-card').forEach(el => {
-        el.classList.add('fade-up');
-        observer.observe(el);
-    });
+
+    document.querySelectorAll('.fade-up').forEach(el => observer.observe(el));
 </script>
 
 </body>

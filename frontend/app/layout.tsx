@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import { AuthProvider } from "@/lib/auth";
 import "./globals.css";
 
@@ -9,15 +9,21 @@ const inter = Inter({
   display: "swap",
 });
 
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-jetbrains",
+  display: "swap",
+});
+
 export const metadata: Metadata = {
-  title: "Codey — Structural-Aware Coding Intelligence",
+  title: "Codey — The coding agent that understands your codebase",
   description:
-    "AI-powered coding sessions with structural health analysis. Write better code, understand structural impact.",
-  keywords: ["AI", "coding", "structural analysis", "developer tools"],
+    "Codey analyzes your codebase as a living network. Every line it writes, it knows exactly where that line sits — and what breaking it would cost.",
+  keywords: ["AI", "coding", "structural analysis", "developer tools", "coding agent"],
   openGraph: {
-    title: "Codey — Structural-Aware Coding Intelligence",
+    title: "Codey — The coding agent that understands your codebase",
     description:
-      "AI-powered coding sessions with structural health analysis. Write better code, understand structural impact.",
+      "Codey analyzes your codebase as a living network. Every line it writes, it knows exactly where that line sits — and what breaking it would cost.",
     type: "website",
   },
 };
@@ -28,8 +34,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${inter.variable} dark`}>
-      <body className="min-h-screen bg-codey-bg font-sans text-codey-text antialiased">
+    <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable} dark`}>
+      <body className="min-h-screen bg-codey-bg-deep font-sans text-codey-text-primary antialiased">
         <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
