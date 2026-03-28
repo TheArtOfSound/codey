@@ -745,6 +745,14 @@
         const navRight = document.getElementById('nav-right');
         navRight.innerHTML = '<a href="dashboard.html" class="nav-cta">Dashboard</a>';
     }
+
+    // Cookie consent — minimal bottom bar, not content-blocking
+    if (!localStorage.getItem('codey_cookies_accepted')) {
+        const banner = document.createElement('div');
+        banner.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#0a1628;border-top:1px solid #1e3a5f;padding:12px 24px;display:flex;align-items:center;justify-content:space-between;z-index:200;font-size:13px;color:#94a3b8;';
+        banner.innerHTML = 'We use essential cookies only. No tracking. <div style="display:flex;gap:8px;align-items:center;"><a href="privacy.html" style="color:#60a5fa;font-size:12px;">Privacy Policy</a><button onclick="localStorage.setItem(\'codey_cookies_accepted\',\'1\');this.closest(\'div\').parentElement.remove();" style="padding:6px 16px;border-radius:4px;border:none;background:#2563eb;color:white;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;">Accept</button></div>';
+        document.body.appendChild(banner);
+    }
 </script>
 
 </body>
