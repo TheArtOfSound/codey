@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Help — Codey</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', system-ui, sans-serif; background: #050a12; color: #f1f5f9; max-width: 700px; margin: 0 auto; padding: 48px 24px; }
+        a { color: #60a5fa; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        h1 { font-size: 28px; margin-bottom: 8px; }
+        .subtitle { color: #94a3b8; font-size: 15px; margin-bottom: 32px; }
+        .search { width: 100%; padding: 12px 16px; border-radius: 8px; border: 1px solid #1e3a5f; background: #0a1628; color: #f1f5f9; font-size: 14px; font-family: inherit; outline: none; margin-bottom: 32px; }
+        .search:focus { border-color: #2563eb; }
+        .section { margin-bottom: 32px; }
+        .section h2 { font-size: 16px; font-weight: 600; color: #60a5fa; margin-bottom: 12px; }
+        .article { display: block; padding: 12px 0; border-bottom: 1px solid rgba(30,58,95,0.3); color: #f1f5f9; font-size: 14px; text-decoration: none; }
+        .article:hover { color: #60a5fa; }
+        .article .desc { font-size: 12px; color: #475569; margin-top: 2px; }
+        .contact { background: #0a1628; border: 1px solid #1e3a5f; border-radius: 8px; padding: 20px; margin-top: 32px; }
+        .contact h3 { font-size: 14px; margin-bottom: 8px; }
+        .contact p { font-size: 13px; color: #94a3b8; }
+        .back { margin-top: 32px; }
+        .back a { font-size: 14px; }
+    </style>
+</head>
+<body>
+<h1>Help Center</h1>
+<p class="subtitle">Find answers to common questions about Codey.</p>
+
+<input type="text" class="search" placeholder="Search help articles..." oninput="filterArticles(this.value)">
+
+<div class="section">
+    <h2>Getting Started</h2>
+    <a class="article" href="#"><strong>Your first prompt</strong><div class="desc">How to submit a prompt and generate code with Codey.</div></a>
+    <a class="article" href="#"><strong>Understanding credits</strong><div class="desc">How credits work, what actions cost, and how to buy more.</div></a>
+    <a class="article" href="#"><strong>Connecting GitHub</strong><div class="desc">How to connect a repository and enable autonomous mode.</div></a>
+    <a class="article" href="#"><strong>Build Mode</strong><div class="desc">How to generate a complete project from a description.</div></a>
+</div>
+
+<div class="section">
+    <h2>Billing</h2>
+    <a class="article" href="#"><strong>Changing your plan</strong><div class="desc">How to upgrade, downgrade, or cancel your subscription.</div></a>
+    <a class="article" href="#"><strong>Buying credit top-ups</strong><div class="desc">How to purchase additional credits that never expire.</div></a>
+    <a class="article" href="#"><strong>Refund policy</strong><div class="desc">When credits are refunded and how to request a refund.</div></a>
+</div>
+
+<div class="section">
+    <h2>Troubleshooting</h2>
+    <a class="article" href="#"><strong>Session failed — no credits charged</strong><div class="desc">Why sessions sometimes fail and what to do about it.</div></a>
+    <a class="article" href="#"><strong>Generated code doesn't run</strong><div class="desc">How to report code quality issues and get help.</div></a>
+    <a class="article" href="#"><strong>GitHub integration issues</strong><div class="desc">Common problems with repo connections and how to fix them.</div></a>
+</div>
+
+<div class="section">
+    <h2>Structural Health</h2>
+    <a class="article" href="#"><strong>What is structural health?</strong><div class="desc">How Codey analyzes your codebase as a network and measures health.</div></a>
+    <a class="article" href="#"><strong>Understanding the health report</strong><div class="desc">What Excellent, Watch this, and Needs attention mean.</div></a>
+    <a class="article" href="#"><strong>Improving your health score</strong><div class="desc">Actionable steps to reduce coupling and improve stability.</div></a>
+</div>
+
+<div class="contact">
+    <h3>Need more help?</h3>
+    <p>Email <a href="mailto:bryan@qira.ai">bryan@qira.ai</a> — we respond within 24 hours on business days.</p>
+</div>
+
+<div class="back"><a href="dashboard.html">&larr; Back to dashboard</a></div>
+
+<script>
+function filterArticles(q) {
+    q = q.toLowerCase();
+    document.querySelectorAll('.article').forEach(a => {
+        a.style.display = a.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+}
+</script>
+</body>
+</html>

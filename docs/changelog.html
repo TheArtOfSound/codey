@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Changelog — Codey</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', system-ui, sans-serif; background: #050a12; color: #f1f5f9; max-width: 700px; margin: 0 auto; padding: 48px 24px; }
+        a { color: #60a5fa; text-decoration: none; }
+        h1 { font-size: 28px; margin-bottom: 32px; }
+        .entry { border-left: 2px solid #1e3a5f; padding-left: 20px; margin-bottom: 32px; position: relative; }
+        .entry::before { content: ''; position: absolute; left: -5px; top: 4px; width: 8px; height: 8px; border-radius: 50%; background: #2563eb; }
+        .entry .date { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #475569; margin-bottom: 4px; }
+        .entry .version { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+        .entry ul { padding-left: 16px; margin: 0; }
+        .entry li { font-size: 14px; color: #94a3b8; padding: 3px 0; }
+        .entry li strong { color: #f1f5f9; }
+        .tag { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; text-transform: uppercase; margin-right: 4px; }
+        .tag-new { background: rgba(34,197,94,0.15); color: #22c55e; }
+        .tag-fix { background: rgba(239,68,68,0.15); color: #ef4444; }
+        .tag-improve { background: rgba(37,99,235,0.15); color: #60a5fa; }
+        .back { margin-top: 32px; }
+        .back a { font-size: 14px; }
+    </style>
+</head>
+<body>
+<h1>Changelog</h1>
+
+<div class="entry">
+    <div class="date">March 28, 2026</div>
+    <div class="version">v1.0.0 — Codey is live.</div>
+    <ul>
+        <li><span class="tag tag-new">new</span> <strong>Code generation</strong> — describe what you want, get production-quality code via Groq Llama 3.3 70B (370 tok/sec)</li>
+        <li><span class="tag tag-new">new</span> <strong>Structural health analysis</strong> — every generated output analyzed for coupling, cohesion, stress, and cascade risk using NFET engine</li>
+        <li><span class="tag tag-new">new</span> <strong>Sandbox execution</strong> — run generated code directly in an isolated sandbox with output display</li>
+        <li><span class="tag tag-new">new</span> <strong>Build Mode</strong> — generate complete projects from a description with LLM-powered planning and phased file generation</li>
+        <li><span class="tag tag-new">new</span> <strong>Credit system</strong> — transparent per-credit pricing with estimates before submit, automatic refund on failure</li>
+        <li><span class="tag tag-new">new</span> <strong>Streaming output</strong> — code appears character by character with blinking cursor for terminal feel</li>
+        <li><span class="tag tag-new">new</span> <strong>Security scanning</strong> — Semgrep SAST on every generated output, assessment score returned</li>
+        <li><span class="tag tag-new">new</span> <strong>Memory system</strong> — Codey remembers your preferences across sessions via vector embeddings</li>
+        <li><span class="tag tag-new">new</span> <strong>Onboarding</strong> — guided 4-step first experience with live code generation</li>
+        <li><span class="tag tag-new">new</span> <strong>8 project templates</strong> — SaaS Starter, REST API, React App, CLI Tool, Discord Bot, Data Pipeline, Mobile API, E-commerce</li>
+        <li><span class="tag tag-new">new</span> <strong>Codebase analysis</strong> — paste code and get a full structural health report with recommendations</li>
+        <li><span class="tag tag-new">new</span> <strong>Multi-provider intelligence</strong> — Groq primary, OpenRouter fallback, 11 providers coded</li>
+        <li><span class="tag tag-new">new</span> <strong>Pricing</strong> — Free (10 credits), Starter ($19/100), Pro ($49/400), Team ($149/1500) + top-up packages</li>
+    </ul>
+</div>
+
+<div class="back"><a href="index.html">&larr; Back to Codey</a></div>
+</body>
+</html>
