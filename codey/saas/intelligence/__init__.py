@@ -2,8 +2,16 @@ from __future__ import annotations
 from codey.saas.intelligence.ensemble import ModelEnsemble
 from codey.saas.intelligence.research import ResearchEngine
 from codey.saas.intelligence.router import TaskRouter
+from codey.saas.intelligence.services import IntelligenceServices, intelligence_services
 
-__all__ = ["TaskRouter", "ModelEnsemble", "IntelligenceStack", "ResearchEngine"]
+__all__ = [
+    "TaskRouter",
+    "ModelEnsemble",
+    "IntelligenceStack",
+    "ResearchEngine",
+    "IntelligenceServices",
+    "intelligence_services",
+]
 
 
 class IntelligenceStack:
