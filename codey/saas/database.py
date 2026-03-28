@@ -18,7 +18,7 @@ engine = create_async_engine(
     pool_size=5,
     max_overflow=5,
     pool_pre_ping=True,
-    connect_args={"ssl": _ssl_context},
+    connect_args={"ssl": _ssl_context, "statement_cache_size": 0, "prepared_statement_cache_size": 0},
 )
 
 async_session_factory = async_sessionmaker(
