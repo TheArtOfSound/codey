@@ -16,6 +16,9 @@ from codey.saas.credits.service import CreditService, InsufficientCreditsError, 
 from codey.saas.database import get_db
 from codey.saas.intelligence import IntelligenceStack
 from codey.saas.models import CodingSession, User
+from codey.saas.sandbox.manager import SandboxManager
+
+_sandbox_manager = SandboxManager()
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -332,3 +335,57 @@ async def commit_session(
         credits_charged=session.credits_charged,
         message="Commit initiated. Code will be pushed to the connected repository.",
     )
+
+
+# ---------------------------------------------------------------------------
+# Code execution (sandbox)
+# ---------------------------------------------------------------------------
+
+
+class RunCodeRequest(BaseModel):
+    code: str
+    language: str = "python"
+
+
+class RunCodeResponse(BaseModel):
+    stdout: str
+    stderr: str
+    exit_code: int
+    timed_out: bool = False
+
+
+@router.post("/run", response_model=RunCodeResponse)
+async def run_code(
+    body: RunCodeRequest,
+    current_user: User = Depends(get_current_user),
+) -> RunCodeResponse:
+    """Execute code in an isolated sandbox and return the output."""
+    # Create sandbox
+    sandbox = await _sandbox_manager.create(
+        user_id=str(current_user.id),
+        session_id="run-" + uuid.uuid4().hex[:8],
+        timeout=30,
+    )
+
+    try:
+        # Determine file extension and run command
+        ext_map = {"python": ("py", "python3"), "javascript": ("js", "node"), "typescript": ("ts", "npx ts-node"), "go": ("go", "go run"), "rust": ("rs", "rustc -o /tmp/out && /tmp/out")}
+        ext, runner = ext_map.get(body.language, ("py", "python3"))
+
+        filename = f"main.{ext}"
+        await _sandbox_manager.write_file(sandbox.id, filename, body.code)
+
+        # Run the code
+        if body.language == "rust":
+            result = await _sandbox_manager.execute(sandbox.id, f"rustc {filename} -o /tmp/out && /tmp/out", timeout=30)
+        else:
+            result = await _sandbox_manager.execute(sandbox.id, f"{runner} {filename}", timeout=30)
+
+        return RunCodeResponse(
+            stdout=result.stdout[:10000],
+            stderr=result.stderr[:5000],
+            exit_code=result.exit_code,
+            timed_out=result.timed_out,
+        )
+    finally:
+        await _sandbox_manager.destroy(sandbox.id)

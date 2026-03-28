@@ -301,15 +301,26 @@ function handlePrompt() {
             const pre = document.createElement('pre');
             pre.style.cssText = 'margin: 0; font-family: "JetBrains Mono", monospace; font-size: 13px; color: #e6edf3; line-height: 1.5; white-space: pre-wrap;';
             pre.textContent = result.output;
+            const btnRow = document.createElement('div');
+            btnRow.style.cssText = 'position: absolute; top: 8px; right: 8px; display: flex; gap: 6px;';
+
+            const runBtn = document.createElement('button');
+            runBtn.textContent = 'Run';
+            runBtn.style.cssText = 'padding: 4px 12px; border-radius: 4px; border: 1px solid #22c55e; background: rgba(34,197,94,0.15); color: #22c55e; font-size: 12px; cursor: pointer; font-family: inherit; font-weight: 600;';
+            runBtn.onclick = function() { runCode(result.output, runBtn, codeBlock); };
+
             const copyBtn = document.createElement('button');
             copyBtn.textContent = 'Copy';
-            copyBtn.style.cssText = 'position: absolute; top: 8px; right: 8px; padding: 4px 12px; border-radius: 4px; border: 1px solid #1e3a5f; background: #111f38; color: #94a3b8; font-size: 12px; cursor: pointer; font-family: inherit;';
+            copyBtn.style.cssText = 'padding: 4px 12px; border-radius: 4px; border: 1px solid #1e3a5f; background: #111f38; color: #94a3b8; font-size: 12px; cursor: pointer; font-family: inherit;';
             copyBtn.onclick = function() {
                 navigator.clipboard.writeText(result.output);
                 copyBtn.textContent = 'Copied';
                 setTimeout(() => copyBtn.textContent = 'Copy', 2000);
             };
-            codeBlock.appendChild(copyBtn);
+
+            btnRow.appendChild(runBtn);
+            btnRow.appendChild(copyBtn);
+            codeBlock.appendChild(btnRow);
             codeBlock.appendChild(pre);
             item.appendChild(codeBlock);
         }
@@ -360,6 +371,66 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+function runCode(rawOutput, btn, codeBlock) {
+    // Extract code from markdown fences
+    let code = rawOutput;
+    const match = rawOutput.match(/```(?:python|javascript|js|typescript|ts|go|rust)?\s*\n([\s\S]*?)```/);
+    if (match) code = match[1].trim();
+
+    btn.textContent = 'Running...';
+    btn.disabled = true;
+
+    fetch(API + '/sessions/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify({ code, language: 'python' })
+    })
+    .then(r => {
+        if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Run failed'); });
+        return r.json();
+    })
+    .then(result => {
+        // Remove existing output panel if any
+        const existing = codeBlock.parentElement.querySelector('.run-output');
+        if (existing) existing.remove();
+
+        const output = document.createElement('div');
+        output.className = 'run-output';
+        const isError = result.exit_code !== 0;
+        const borderColor = isError ? '#ef4444' : '#22c55e';
+        const label = result.timed_out ? 'Timed out' : (isError ? 'Error (exit ' + result.exit_code + ')' : 'Output');
+        const content = (result.stdout || result.stderr || '(no output)').trim();
+
+        output.innerHTML = `
+            <div style="margin-top: 8px; background: #0d1117; border: 1px solid ${borderColor}; border-radius: 6px; padding: 12px; position: relative;">
+                <div style="font-size: 11px; font-weight: 600; color: ${borderColor}; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em;">${label}</div>
+                <pre style="margin: 0; font-family: 'JetBrains Mono', monospace; font-size: 13px; color: #e6edf3; white-space: pre-wrap;">${escapeHtml(content)}</pre>
+            </div>
+        `;
+        codeBlock.parentElement.appendChild(output);
+
+        btn.textContent = 'Run';
+        btn.disabled = false;
+    })
+    .catch(err => {
+        btn.textContent = 'Run';
+        btn.disabled = false;
+
+        const existing = codeBlock.parentElement.querySelector('.run-output');
+        if (existing) existing.remove();
+
+        const output = document.createElement('div');
+        output.className = 'run-output';
+        output.innerHTML = `
+            <div style="margin-top: 8px; background: #0d1117; border: 1px solid #ef4444; border-radius: 6px; padding: 12px;">
+                <div style="font-size: 11px; font-weight: 600; color: #ef4444; margin-bottom: 8px;">SANDBOX UNAVAILABLE</div>
+                <pre style="margin: 0; font-family: 'JetBrains Mono', monospace; font-size: 13px; color: #94a3b8; white-space: pre-wrap;">${escapeHtml(err.message)}</pre>
+            </div>
+        `;
+        codeBlock.parentElement.appendChild(output);
+    });
 }
 
 // Enter key to submit
