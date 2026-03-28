@@ -102,9 +102,13 @@ class AuthService:
         # Send welcome email (best-effort)
         try:
             from codey.saas.emails.service import EmailService
-            from codey.saas.emails.templates import welcome_email
+            from codey.saas.emails.templates import welcome
             email_svc = EmailService()
-            subject, html = welcome_email(name or email)
+            subject, html = welcome(
+                name=name or email,
+                dashboard_url="https://theartofsound.github.io/codey/dashboard.html",
+                credits=10,
+            )
             await email_svc.send_email(email, subject, html)
         except Exception:
             import logging

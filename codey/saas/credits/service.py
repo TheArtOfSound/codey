@@ -162,6 +162,26 @@ class CreditService:
         )
 
         await self.db.flush()
+
+        # Check if credits dropped below 20% — send low credits email
+        plan_credits = PLAN_CREDITS.get(user.plan, 10)
+        if plan_credits > 0 and credits_after > 0:
+            pct = credits_after / plan_credits
+            if pct <= 0.20 and credits_before / plan_credits > 0.20:
+                # Just crossed the 20% threshold
+                try:
+                    from codey.saas.emails.service import EmailService
+                    from codey.saas.emails.templates import low_credits
+                    email_svc = EmailService()
+                    subject, html = low_credits(
+                        credits_remaining=credits_after,
+                        plan_credits=plan_credits,
+                        topup_url="https://theartofsound.github.io/codey/pricing.html",
+                    )
+                    await email_svc.send_email(user.email, subject, html)
+                except Exception:
+                    pass  # Email is best-effort
+
         return tx
 
     async def refund_credits(
