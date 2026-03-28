@@ -7,7 +7,7 @@ import logging
 import os
 from typing import Any
 
-import anthropic
+# import anthropic  # Replaced with provider system
 
 from codey.graph.engine import CodebaseGraph
 from codey.llm.prompt_builder import PromptBuilder
@@ -35,12 +35,8 @@ class CodeAgent:
         self.model = model
         self.prompt_builder = PromptBuilder(graph, sweep_engine)
 
-        resolved_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-        if not resolved_key:
-            raise ValueError(
-                "No API key provided. Pass api_key= or set ANTHROPIC_API_KEY."
-            )
-        self.client = anthropic.Anthropic(api_key=resolved_key)
+        # Use provider system instead of direct Anthropic
+        pass
 
     # ------------------------------------------------------------------
     # Public API
@@ -156,29 +152,32 @@ class CodeAgent:
     # ------------------------------------------------------------------
 
     def _call_llm(self, system: str, messages: list[dict[str, str]]) -> str:
-        """Make the actual API call to Claude and return the text response."""
+        """Make an API call via the multi-provider system."""
+        import asyncio
+        from codey.saas.intelligence.providers import call_model, resolve_model
+
+        provider, model = resolve_model("code_generation")
+        api_messages = [{"role": "system", "content": system}] + messages
+
+        # Handle both sync and async contexts
         try:
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=4096,
-                system=system,
-                messages=messages,
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            # We're in an async context — create a new task
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(
+                    asyncio.run,
+                    call_model(provider, model, api_messages, max_tokens=4096)
+                )
+                return future.result(timeout=120)
+        else:
+            return asyncio.run(
+                call_model(provider, model, api_messages, max_tokens=4096)
             )
-            # Extract text from the response content blocks
-            text_parts = []
-            for block in response.content:
-                if block.type == "text":
-                    text_parts.append(block.text)
-            return "\n".join(text_parts)
-        except anthropic.APIConnectionError as exc:
-            logger.error("Failed to connect to Anthropic API: %s", exc)
-            raise
-        except anthropic.RateLimitError as exc:
-            logger.error("Rate limited by Anthropic API: %s", exc)
-            raise
-        except anthropic.APIStatusError as exc:
-            logger.error("Anthropic API error (status %d): %s", exc.status_code, exc.message)
-            raise
 
     # ------------------------------------------------------------------
     # Response parsing
