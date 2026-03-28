@@ -26,8 +26,33 @@ class Settings(BaseSettings):
     s3_bucket: str = "codey-uploads"
     s3_region: str = "us-east-1"
 
+    # AI provider keys
+    gemini_api_key: str = ""
+    groq_api_key: str = ""
+    openrouter_api_key: str = ""
+    mistral_api_key: str = ""
+    deepseek_api_key: str = ""
+    together_api_key: str = ""
+    fireworks_api_key: str = ""
+    cloudflare_api_key: str = ""
+    cloudflare_account_id: str = ""
+    huggingface_api_key: str = ""
+    cohere_api_key: str = ""
+
+    # Search keys
+    tavily_api_key: str = ""
+    brave_search_api_key: str = ""
+    exa_api_key: str = ""
+
+    # Sandbox
+    e2b_api_key: str = ""
+
+    # Monitoring
+    sentry_dsn: str = ""
+
     class Config:
         env_file = ".env"
+        extra = "ignore"
 
 
 settings = Settings()
