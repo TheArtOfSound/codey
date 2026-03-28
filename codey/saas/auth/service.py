@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 import bcrypt
 import stripe
@@ -120,7 +120,7 @@ class AuthService:
                 detail="Invalid email or password",
             )
 
-        user.last_active = datetime.now(timezone.utc)
+        user.last_active = datetime.utcnow()
         await self.db.flush()
 
         token = self._make_token(user)
@@ -174,7 +174,7 @@ class AuthService:
             if gh_info.get("avatar_url") and not user.avatar_url:
                 user.avatar_url = gh_info["avatar_url"]
 
-        user.last_active = datetime.now(timezone.utc)
+        user.last_active = datetime.utcnow()
         await self.db.flush()
 
         token = self._make_token(user)
@@ -222,7 +222,7 @@ class AuthService:
             if google_info.get("avatar_url") and not user.avatar_url:
                 user.avatar_url = google_info["avatar_url"]
 
-        user.last_active = datetime.now(timezone.utc)
+        user.last_active = datetime.utcnow()
         await self.db.flush()
 
         token = self._make_token(user)
