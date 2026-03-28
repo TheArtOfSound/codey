@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Welcome — Codey</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+        :root { --bg-deep: #050a12; --bg-surface: #0a1628; --border: #1e3a5f; --blue-primary: #2563eb; --blue-light: #60a5fa; --text-primary: #f1f5f9; --text-secondary: #94a3b8; --text-muted: #475569; --green: #22c55e; }
+        body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg-deep); color: var(--text-primary); min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+        .step { display: none; max-width: 560px; width: 100%; padding: 24px; text-align: center; }
+        .step.active { display: flex; flex-direction: column; align-items: center; }
+        .logo { font-size: 24px; font-weight: 700; margin-bottom: 48px; }
+        .logo span { color: var(--blue-light); }
+        h1 { font-size: 28px; font-weight: 700; margin-bottom: 12px; }
+        p { color: var(--text-secondary); font-size: 15px; line-height: 1.6; margin-bottom: 24px; }
+        .credits-badge { display: inline-flex; align-items: center; gap: 6px; padding: 6px 16px; border-radius: 20px; background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.3); color: var(--green); font-size: 14px; font-weight: 600; margin-bottom: 32px; }
+        .btn { padding: 12px 32px; border-radius: 8px; border: none; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; transition: all 150ms; }
+        .btn-primary { background: var(--blue-primary); color: white; }
+        .btn-primary:hover { filter: brightness(1.15); }
+        .btn-ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--border); }
+        .btn-ghost:hover { border-color: var(--blue-primary); color: var(--text-primary); }
+        .btn-row { display: flex; gap: 12px; justify-content: center; }
+        .skip { color: var(--text-muted); font-size: 13px; margin-top: 16px; cursor: pointer; }
+        .skip:hover { color: var(--text-secondary); }
+        /* Step 2: prompt */
+        .prompt-preview { width: 100%; background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; text-align: left; font-size: 14px; color: var(--text-primary); margin-bottom: 8px; line-height: 1.6; }
+        .estimate { font-size: 12px; color: var(--text-muted); margin-bottom: 24px; }
+        /* Step 3: streaming */
+        .code-output { width: 100%; background: #0d1117; border: 1px solid var(--border); border-radius: 8px; padding: 16px; text-align: left; font-family: 'JetBrains Mono', monospace; font-size: 13px; color: #e6edf3; min-height: 200px; max-height: 400px; overflow-y: auto; white-space: pre-wrap; line-height: 1.5; }
+        .status-line { font-size: 13px; color: var(--text-muted); margin-bottom: 12px; text-align: left; width: 100%; }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        /* Step 4 */
+        .result-stats { display: flex; gap: 24px; justify-content: center; margin-bottom: 24px; }
+        .stat { text-align: center; }
+        .stat .num { font-size: 24px; font-weight: 700; color: var(--blue-light); }
+        .stat .label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; }
+    </style>
+</head>
+<body>
+
+<!-- Step 1: Welcome -->
+<div class="step active" id="step1">
+    <div class="logo"><span>[</span>ODEY</div>
+    <h1>Welcome to Codey.</h1>
+    <div class="credits-badge">10 free credits to start</div>
+    <p>Codey generates production code, analyzes structural health, and understands your codebase as a living network. Let's build something.</p>
+    <div class="btn-row">
+        <button class="btn btn-primary" onclick="goStep(2)">Try your first prompt</button>
+        <button class="btn btn-ghost" onclick="finish()">Skip to dashboard</button>
+    </div>
+</div>
+
+<!-- Step 2: Pre-filled prompt -->
+<div class="step" id="step2">
+    <div class="logo"><span>[</span>ODEY</div>
+    <h1>Your first build.</h1>
+    <p>This is an example prompt. Edit it or use it as-is.</p>
+    <div class="prompt-preview" id="onboard-prompt" contenteditable="true">Build a REST API endpoint that returns a paginated list of users from a PostgreSQL database, with JWT authentication and input validation.</div>
+    <div class="estimate">Estimated cost: 1-3 credits &middot; 10 credits remaining</div>
+    <button class="btn btn-primary" onclick="runOnboarding()">Build it &rarr;</button>
+</div>
+
+<!-- Step 3: Watch it work -->
+<div class="step" id="step3">
+    <div class="logo"><span>[</span>ODEY</div>
+    <div class="status-line" id="status-line">Analyzing request...</div>
+    <div class="code-output" id="code-output"></div>
+</div>
+
+<!-- Step 4: Result -->
+<div class="step" id="step4">
+    <div class="logo"><span>[</span>ODEY</div>
+    <h1>Done.</h1>
+    <div class="result-stats">
+        <div class="stat"><div class="num" id="r-lines">0</div><div class="label">Lines</div></div>
+        <div class="stat"><div class="num" id="r-credits">1</div><div class="label">Credits</div></div>
+        <div class="stat"><div class="num" id="r-remaining">9</div><div class="label">Remaining</div></div>
+    </div>
+    <div class="btn-row">
+        <button class="btn btn-primary" onclick="finish()">Go to dashboard</button>
+        <button class="btn btn-ghost" onclick="goStep(2)">Try another prompt</button>
+    </div>
+</div>
+
+<script>
+const API = 'https://codey-jc2r.onrender.com';
+const token = localStorage.getItem('codey_token');
+if (!token) window.location.href = 'signup.html';
+
+function goStep(n) {
+    document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+    document.getElementById('step' + n).classList.add('active');
+}
+
+function finish() {
+    localStorage.setItem('codey_onboarded', 'true');
+    window.location.href = 'dashboard.html';
+}
+
+async function runOnboarding() {
+    const prompt = document.getElementById('onboard-prompt').textContent.trim();
+    goStep(3);
+
+    const statusEl = document.getElementById('status-line');
+    const codeEl = document.getElementById('code-output');
+
+    // Status animations
+    const statuses = ['Analyzing request...', 'Planning structure...', 'Writing code...'];
+    let si = 0;
+    const statusInterval = setInterval(() => {
+        si++;
+        if (si < statuses.length) statusEl.textContent = statuses[si];
+    }, 800);
+
+    try {
+        const resp = await fetch(API + '/sessions/prompt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+            body: JSON.stringify({ prompt })
+        });
+        clearInterval(statusInterval);
+
+        if (!resp.ok) {
+            const err = await resp.json();
+            statusEl.textContent = 'Generation failed. No credits charged.';
+            codeEl.textContent = err.detail || 'Unknown error';
+            setTimeout(() => goStep(4), 3000);
+            return;
+        }
+
+        const data = await resp.json();
+        statusEl.textContent = 'Streaming output...';
+
+        // Stream the code
+        const fullCode = data.output || '';
+        codeEl.textContent = '';
+        const cursor = document.createElement('span');
+        cursor.style.cssText = 'display:inline-block;width:8px;height:16px;background:#60a5fa;animation:blink 800ms step-end infinite;';
+        codeEl.appendChild(cursor);
+
+        let idx = 0;
+        const stream = setInterval(() => {
+            const chunk = fullCode.substring(idx, Math.min(idx + 4, fullCode.length));
+            cursor.before(document.createTextNode(chunk));
+            idx += 4;
+            codeEl.scrollTop = codeEl.scrollHeight;
+            if (idx >= fullCode.length) {
+                clearInterval(stream);
+                cursor.remove();
+                statusEl.textContent = `Done. ${data.lines_generated} lines, ${data.estimated_credits} credit${data.estimated_credits > 1 ? 's' : ''} used.`;
+                // Show step 4 after a pause
+                document.getElementById('r-lines').textContent = data.lines_generated || 0;
+                document.getElementById('r-credits').textContent = data.estimated_credits || 1;
+                const user = JSON.parse(localStorage.getItem('codey_user') || '{}');
+                const remaining = (user.credits_remaining || 10) - (data.estimated_credits || 1);
+                document.getElementById('r-remaining').textContent = remaining;
+                setTimeout(() => goStep(4), 2000);
+            }
+        }, 10);
+
+    } catch (e) {
+        clearInterval(statusInterval);
+        statusEl.textContent = 'Connection failed. Try again from the dashboard.';
+        setTimeout(() => goStep(4), 3000);
+    }
+}
+
+// Check if already onboarded
+if (localStorage.getItem('codey_onboarded') === 'true') {
+    window.location.href = 'dashboard.html';
+}
+</script>
+</body>
+</html>
