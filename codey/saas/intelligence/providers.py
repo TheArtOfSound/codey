@@ -83,11 +83,14 @@ MODELS: dict[str, dict[str, str]] = {
     "default": {"provider": "openrouter", "model": "meta-llama/llama-3.3-70b-instruct:free"},
 }
 
-# Fallback models when primary is rate-limited
+# Fallback models when primary is rate-limited (tried in order)
 FALLBACK_MODELS: list[dict[str, str]] = [
+    # Free models (different providers to spread rate limits)
     {"provider": "openrouter", "model": "mistralai/mistral-small-3.1-24b-instruct:free"},
     {"provider": "openrouter", "model": "google/gemma-3-27b-it:free"},
-    {"provider": "openrouter", "model": "qwen/qwen3-32b:free"},
+    # Paid but extremely cheap fallback (~$0.0001/request) — works when all free are throttled
+    {"provider": "openrouter", "model": "deepseek/deepseek-chat"},
+    {"provider": "openrouter", "model": "mistralai/mistral-small-3.1-24b-instruct"},
 ]
 
 # ---------------------------------------------------------------------------
