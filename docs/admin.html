@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin — Codey</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+        :root { --bg-deep: #050a12; --bg-surface: #0a1628; --border: #1e3a5f; --blue-primary: #2563eb; --blue-light: #60a5fa; --text-primary: #f1f5f9; --text-secondary: #94a3b8; --text-muted: #475569; --green: #22c55e; --yellow: #eab308; --red: #ef4444; }
+        body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg-deep); color: var(--text-primary); min-height: 100vh; padding: 24px; }
+        .container { max-width: 1100px; margin: 0 auto; }
+        h1 { font-size: 24px; font-weight: 700; margin-bottom: 24px; }
+        .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 32px; }
+        .stat { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px; }
+        .stat .label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+        .stat .value { font-size: 28px; font-weight: 700; }
+        .stat .sub { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+        .panel { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+        .panel h2 { font-size: 16px; font-weight: 600; margin-bottom: 12px; }
+        .search { width: 100%; padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border); background: #0a1628; color: var(--text-primary); font-size: 14px; font-family: inherit; margin-bottom: 16px; outline: none; }
+        .search:focus { border-color: var(--blue-primary); }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid rgba(30,58,95,0.3); font-size: 13px; }
+        th { color: var(--text-muted); font-weight: 600; text-transform: uppercase; font-size: 11px; }
+        td { color: var(--text-secondary); }
+        .badge { padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+        .badge-free { background: rgba(71,85,105,0.2); color: #94a3b8; }
+        .badge-pro { background: rgba(37,99,235,0.2); color: #60a5fa; }
+        .back a { color: var(--blue-light); text-decoration: none; font-size: 14px; }
+        @media (max-width: 768px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>Admin Dashboard</h1>
+
+    <div class="stats">
+        <div class="stat"><div class="label">Total Users</div><div class="value" id="s-users" style="color:#60a5fa;">—</div><div class="sub">All time</div></div>
+        <div class="stat"><div class="label">MRR</div><div class="value" id="s-mrr" style="color:#22c55e;">—</div><div class="sub">Monthly recurring</div></div>
+        <div class="stat"><div class="label">Sessions Today</div><div class="value" id="s-sessions" style="color:#60a5fa;">—</div><div class="sub">Code generations</div></div>
+        <div class="stat"><div class="label">API Cost Today</div><div class="value" id="s-cost" style="color:#eab308;">—</div><div class="sub">LLM provider costs</div></div>
+    </div>
+
+    <div class="panel">
+        <h2>User Search</h2>
+        <input type="text" class="search" id="user-search" placeholder="Search by email..." oninput="searchUsers()">
+        <table>
+            <thead><tr><th>Email</th><th>Plan</th><th>Credits</th><th>Sessions</th><th>Joined</th></tr></thead>
+            <tbody id="user-table"><tr><td colspan="5" style="color:#475569;">Loading...</td></tr></tbody>
+        </table>
+    </div>
+
+    <div class="back" style="margin-top:24px;"><a href="dashboard.html">&larr; Back to dashboard</a></div>
+</div>
+
+<script>
+const API = 'https://codey-jc2r.onrender.com';
+const token = localStorage.getItem('codey_token');
+
+// Load admin stats
+fetch(API + '/admin/stats', { headers: { 'Authorization': 'Bearer ' + token } })
+    .then(r => r.json())
+    .then(d => {
+        document.getElementById('s-users').textContent = d.total_users ?? '—';
+        document.getElementById('s-mrr').textContent = '$' + ((d.mrr_cents ?? 0) / 100).toFixed(0);
+        document.getElementById('s-sessions').textContent = d.sessions_today ?? '—';
+        document.getElementById('s-cost').textContent = '$' + ((d.api_cost_today_cents ?? 0) / 100).toFixed(2);
+    })
+    .catch(() => {});
+
+// Load users
+fetch(API + '/admin/users', { headers: { 'Authorization': 'Bearer ' + token } })
+    .then(r => r.json())
+    .then(users => {
+        const tbody = document.getElementById('user-table');
+        tbody.innerHTML = (users.users || users || []).map(u => `
+            <tr>
+                <td>${u.email}</td>
+                <td><span class="badge badge-${u.plan}">${u.plan}</span></td>
+                <td>${u.credits_remaining ?? 0}</td>
+                <td>${u.total_sessions ?? 0}</td>
+                <td>${new Date(u.created_at).toLocaleDateString()}</td>
+            </tr>
+        `).join('');
+    })
+    .catch(() => { document.getElementById('user-table').innerHTML = '<tr><td colspan="5" style="color:#ef4444;">Admin access required</td></tr>'; });
+
+function searchUsers() {
+    const q = document.getElementById('user-search').value.toLowerCase();
+    document.querySelectorAll('#user-table tr').forEach(row => {
+        row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+}
+</script>
+</body>
+</html>

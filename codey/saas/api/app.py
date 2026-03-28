@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from codey.saas.billing.stripe_setup import setup_stripe_products
 from codey.saas.config import settings
+from codey.saas.security.middleware import SecurityMiddleware
 
 # ---------------------------------------------------------------------------
 # Sentry (conditional on SENTRY_DSN)
@@ -43,6 +44,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 app = FastAPI(title="Codey API", version="1.0.0", lifespan=lifespan)
 
+app.add_middleware(SecurityMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[

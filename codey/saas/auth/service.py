@@ -98,6 +98,18 @@ class AuthService:
         await self.db.flush()
 
         token = self._make_token(user)
+
+        # Send welcome email (best-effort)
+        try:
+            from codey.saas.emails.service import EmailService
+            from codey.saas.emails.templates import welcome_email
+            email_svc = EmailService()
+            subject, html = welcome_email(name or email)
+            await email_svc.send_email(email, subject, html)
+        except Exception:
+            import logging
+            logging.getLogger("codey").debug("Welcome email skipped", exc_info=True)
+
         return user, token
 
     async def login(self, email: str, password: str) -> tuple[User, str]:
