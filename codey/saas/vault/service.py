@@ -7,7 +7,7 @@ import json
 import logging
 import uuid
 import zipfile
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import delete, func, select, update
@@ -120,7 +120,7 @@ class VaultService:
         if project is not None:
             project.total_versions = next_version
             project.total_sessions = (project.total_sessions or 0) + (1 if session_id else 0)
-            project.last_activity = datetime.now(timezone.utc)
+            project.last_activity = datetime.utcnow()
             if nfet_state:
                 project.latest_nfet_phase = nfet_state.get("phase")
                 project.latest_es_score = nfet_state.get("es_score")
@@ -226,7 +226,7 @@ class VaultService:
                 return export_record
 
             export_record.status = "completed"
-            export_record.completed_at = datetime.now(timezone.utc)
+            export_record.completed_at = datetime.utcnow()
         except Exception as exc:
             logger.exception("Export failed for project %s", project_id)
             export_record.status = "failed"

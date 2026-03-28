@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -114,7 +114,7 @@ class AuditLogger:
         minutes: int = 15,
     ) -> int:
         """Count failed login attempts from *ip_address* in the last *minutes*."""
-        cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+        cutoff = datetime.utcnow() - timedelta(minutes=minutes)
         stmt = (
             select(func.count())
             .select_from(SecurityAuditLog)
@@ -140,7 +140,7 @@ class AuditLogger:
 
         # 1. Unusual credit usage — any single day exceeding 3x the user's
         #    daily average over the last 30 days.
-        thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
+        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
         stmt = text(
             """
             WITH daily AS (
@@ -172,8 +172,8 @@ class AuditLogger:
 
         # 2. Login from new IP — IPs seen in the last 24 hours that were
         #    never seen in the prior 90 days.
-        one_day_ago = datetime.now(timezone.utc) - timedelta(days=1)
-        ninety_days_ago = datetime.now(timezone.utc) - timedelta(days=90)
+        one_day_ago = datetime.utcnow() - timedelta(days=1)
+        ninety_days_ago = datetime.utcnow() - timedelta(days=90)
         stmt_new_ip = text(
             """
             SELECT DISTINCT ip_address
@@ -202,7 +202,7 @@ class AuditLogger:
                 {
                     "type": "new_login_ip",
                     "detail": f"Login from previously unseen IP {row[0]}",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.utcnow().isoformat(),
                 }
             )
 
@@ -223,7 +223,7 @@ class AuditLogger:
                 {
                     "type": "brute_force_attempt",
                     "detail": f"{failure_count} failed login attempts in the last 24 hours",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.utcnow().isoformat(),
                 }
             )
 

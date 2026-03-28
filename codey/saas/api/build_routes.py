@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 import zipfile
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -550,7 +550,7 @@ async def build_plan(
         project_plan={"phases": phases},
         file_tree={"tree": file_tree_data},
         stack=stack,
-        started_at=datetime.now(timezone.utc),
+        started_at=datetime.utcnow(),
     )
     db.add(project)
     await db.flush()
@@ -743,7 +743,7 @@ async def handle_checkpoint(
         nfet_es_score=project.nfet_es_score_final,
         user_action=body.action,
         user_notes=body.notes,
-        checkpoint_at=datetime.now(timezone.utc),
+        checkpoint_at=datetime.utcnow(),
     )
     db.add(checkpoint)
 
@@ -752,7 +752,7 @@ async def handle_checkpoint(
         next_phase = phase + 1
         if project.total_phases and next_phase > project.total_phases:
             project.status = "completed"
-            project.completed_at = datetime.now(timezone.utc)
+            project.completed_at = datetime.utcnow()
         else:
             project.current_phase = next_phase
     elif body.action == "modify":
@@ -884,7 +884,7 @@ async def build_stream(
     await websocket.send_json({
         "type": "status",
         "data": {"message": "Connected to build stream", "project_id": project_id},
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.utcnow().isoformat(),
     })
 
     try:
@@ -901,13 +901,13 @@ async def build_stream(
                     await websocket.send_json({
                         "type": "pong",
                         "data": {},
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.utcnow().isoformat(),
                     })
                 elif msg.get("type") == "cancel":
                     await websocket.send_json({
                         "type": "status",
                         "data": {"message": "Build cancellation requested"},
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.utcnow().isoformat(),
                     })
             except (json.JSONDecodeError, KeyError):
                 pass

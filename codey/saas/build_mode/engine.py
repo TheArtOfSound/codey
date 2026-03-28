@@ -8,7 +8,7 @@ import os
 import tempfile
 import zipfile
 from collections.abc import AsyncGenerator
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -326,7 +326,7 @@ class BuildEngine:
                     generation_attempts=attempts,
                     validation_passed=len(import_errors) == 0,
                     credits_charged=file_credits,
-                    generated_at=datetime.now(timezone.utc),
+                    generated_at=datetime.utcnow(),
                 )
                 self.db.add(build_file)
 
@@ -421,7 +421,7 @@ class BuildEngine:
         download_url = await self._package_project(project_id, context)
         project.download_url = download_url
         project.status = "completed"
-        project.completed_at = datetime.now(timezone.utc)
+        project.completed_at = datetime.utcnow()
 
         # Final NFET scores
         nfet_final = context.nfet_state

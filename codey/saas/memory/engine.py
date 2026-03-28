@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select, update
@@ -170,7 +170,7 @@ class MemoryEngine:
         # --- Finalize ---
         memory.memory_version += 1
         memory.total_sessions_analyzed = (memory.total_sessions_analyzed or 0) + 1
-        memory.last_updated = datetime.now(timezone.utc)
+        memory.last_updated = datetime.utcnow()
 
         # Log the update
         log_entry = MemoryUpdateLog(
@@ -380,7 +380,7 @@ class MemoryEngine:
         # Store insights in proactive queue
         if insights:
             memory.proactive_queue = insights
-            memory.last_updated = datetime.now(timezone.utc)
+            memory.last_updated = datetime.utcnow()
             await db.flush()
 
         return insights
@@ -401,7 +401,7 @@ class MemoryEngine:
         prefs.append(preference.strip())
         memory.explicit_preferences = prefs
         memory.memory_version += 1
-        memory.last_updated = datetime.now(timezone.utc)
+        memory.last_updated = datetime.utcnow()
 
         log_entry = MemoryUpdateLog(
             user_id=user_id,
@@ -434,7 +434,7 @@ class MemoryEngine:
         removed = prefs.pop(index)
         memory.explicit_preferences = prefs
         memory.memory_version += 1
-        memory.last_updated = datetime.now(timezone.utc)
+        memory.last_updated = datetime.utcnow()
 
         log_entry = MemoryUpdateLog(
             user_id=user_id,
@@ -466,7 +466,7 @@ class MemoryEngine:
         memory.proactive_queue = []
         memory.memory_version = old_version + 1
         memory.total_sessions_analyzed = 0
-        memory.last_updated = datetime.now(timezone.utc)
+        memory.last_updated = datetime.utcnow()
 
         log_entry = MemoryUpdateLog(
             user_id=user_id,

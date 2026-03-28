@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from fastapi import HTTPException, status
 from jose import JWTError, jwt
@@ -13,7 +13,7 @@ def create_access_token(
     expires_delta: timedelta | None = None,
 ) -> str:
     """Create a signed JWT with ``sub=user_id`` and an expiration claim."""
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
     expire = now + (expires_delta or timedelta(minutes=settings.jwt_expire_minutes))
     payload = {
         "sub": user_id,

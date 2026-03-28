@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 
 from codey.saas.tasks.celery_app import celery_app
 
@@ -31,7 +31,7 @@ def reset_monthly_credits(self) -> dict:
     """
     import asyncio
 
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
     if now.day != 1:
         return {"status": "skipped", "reason": "not first of month"}
 

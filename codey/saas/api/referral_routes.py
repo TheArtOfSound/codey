@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -142,7 +142,7 @@ async def convert_referral(
 
     # Mark as converted
     referral.status = "converted"
-    referral.converted_at = datetime.now(timezone.utc)
+    referral.converted_at = datetime.utcnow()
     referral.credits_issued_referrer = REFERRER_CREDITS
     referral.credits_issued_referred = REFERRED_CREDITS
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from codey.saas.auth.dependencies import get_current_user
 from codey.saas.credits.service import CreditService, InsufficientCreditsError, CREDIT_COSTS
 from codey.saas.database import get_db
+from codey.saas.intelligence import IntelligenceStack
 from codey.saas.models import CodingSession, User
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -33,6 +34,9 @@ class PromptRequest(BaseModel):
 class PromptResponse(BaseModel):
     session_id: str
     estimated_credits: int
+    output: str | None = None
+    lines_generated: int = 0
+    status: str = "running"
 
 
 class AnalyzeResponse(BaseModel):
@@ -106,16 +110,65 @@ async def create_prompt_session(
         repo_connected=body.repo_id,
         status="running",
         credits_charged=estimated,
-        started_at=datetime.now(timezone.utc),
+        started_at=datetime.utcnow(),
     )
     db.add(session)
     await db.flush()
 
-    # Actual AI execution happens asynchronously; the client connects via WebSocket
-    return PromptResponse(
-        session_id=str(session.id),
-        estimated_credits=estimated,
-    )
+    # 4. Run the intelligence stack
+    try:
+        stack = IntelligenceStack()
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are Codey, a coding AI. Generate clean, production-quality code. "
+                    "Return ONLY the code, no explanations unless asked. "
+                    "Always use the latest stable package versions."
+                ),
+            },
+            {"role": "user", "content": body.prompt},
+        ]
+        context = {"language": body.language or "python", "user_id": str(current_user.id), "db": db}
+        result = await stack.run(body.prompt, messages, context)
+
+        output = result.content
+        lines = output.count("\n") + 1
+
+        session.status = "completed"
+        session.output_summary = output
+        session.lines_generated = lines
+        session.completed_at = datetime.utcnow()
+        await db.flush()
+
+        return PromptResponse(
+            session_id=str(session.id),
+            estimated_credits=estimated,
+            output=output,
+            lines_generated=lines,
+            status="completed",
+        )
+    except Exception as e:
+        # Refund credits on failure
+        session.status = "failed"
+        session.error_message = str(e)
+        session.completed_at = datetime.utcnow()
+        session.credits_charged = 0
+        await db.flush()
+        # Attempt refund
+        try:
+            await credit_service.refund_credits(
+                user_id=current_user.id,
+                amount=estimated,
+                description=f"Refund: session failed — {str(e)[:60]}",
+            )
+        except Exception:
+            pass
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Code generation failed: {str(e)[:200]}",
+        )
 
 
 @router.post("/analyze", response_model=AnalyzeResponse, status_code=status.HTTP_201_CREATED)
@@ -160,7 +213,7 @@ async def create_analyze_session(
         files_uploaded=saved_paths,
         status="running",
         credits_charged=cost,
-        started_at=datetime.now(timezone.utc),
+        started_at=datetime.utcnow(),
     )
     db.add(session)
     await db.flush()

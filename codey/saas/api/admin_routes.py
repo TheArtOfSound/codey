@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
@@ -173,7 +173,7 @@ async def get_admin_stats(
     total_sessions = session_result.scalar_one()
 
     # Signups last 30 days
-    thirty_days_ago = datetime.now(timezone.utc).replace(
+    thirty_days_ago = datetime.utcnow().replace(
         hour=0, minute=0, second=0, microsecond=0
     )
     from datetime import timedelta

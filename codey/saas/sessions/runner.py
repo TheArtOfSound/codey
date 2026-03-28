@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import tempfile
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from uuid import UUID
 
@@ -216,7 +216,7 @@ class SessionRunner:
             session.lines_generated = total_lines
             session.files_modified = files_modified
             session.output_summary = explanation[:500] if explanation else None
-            session.completed_at = datetime.now(timezone.utc)
+            session.completed_at = datetime.utcnow()
             await db.flush()
             await db.commit()
 
@@ -359,7 +359,7 @@ class SessionRunner:
             session.lines_generated = 0
             session.files_modified = 0
             session.output_summary = health_summary[:500]
-            session.completed_at = datetime.now(timezone.utc)
+            session.completed_at = datetime.utcnow()
             await db.flush()
             await db.commit()
 
@@ -458,7 +458,7 @@ class SessionRunner:
             session = await self._get_session(db, session_id)
             session.status = "failed"
             session.error_message = error_msg[:1000]
-            session.completed_at = datetime.now(timezone.utc)
+            session.completed_at = datetime.utcnow()
 
             if reserved_credits > 0:
                 await credit_svc.refund_credits(
