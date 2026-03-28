@@ -222,7 +222,7 @@ if (!token) {
         }
     } catch (e) {}
 
-    // Fetch fresh user data
+    // Fetch fresh user data (non-blocking — don't redirect on failure)
     fetch(API + '/users/me', {
         headers: { 'Authorization': 'Bearer ' + token }
     })
@@ -238,10 +238,8 @@ if (!token) {
         document.getElementById('stat-plan').textContent = plan;
     })
     .catch(() => {
-        // Token expired
-        localStorage.removeItem('codey_token');
-        localStorage.removeItem('codey_user');
-        window.location.href = 'login.html';
+        // Fetch failed but we have a token — use cached data, don't redirect
+        console.log('Could not refresh user data — using cached data');
     });
 }
 
