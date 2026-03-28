@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Examples — Codey</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+        :root { --bg-deep: #050a12; --bg-surface: #0a1628; --bg-raised: #111f38; --border: #1e3a5f; --blue-primary: #2563eb; --blue-light: #60a5fa; --text-primary: #f1f5f9; --text-secondary: #94a3b8; --text-muted: #475569; --green: #22c55e; }
+        body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg-deep); color: var(--text-primary); min-height: 100vh; padding: 24px; }
+        .container { max-width: 900px; margin: 0 auto; }
+        .nav a { color: var(--text-primary); text-decoration: none; font-size: 20px; font-weight: 700; display: inline-block; margin-bottom: 32px; }
+        .nav span { color: var(--blue-light); }
+        h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
+        .subtitle { color: var(--text-secondary); font-size: 15px; margin-bottom: 32px; }
+        .categories { display: flex; gap: 8px; margin-bottom: 24px; flex-wrap: wrap; }
+        .cat-btn { padding: 6px 14px; border-radius: 20px; border: 1px solid var(--border); background: transparent; color: var(--text-secondary); font-size: 13px; cursor: pointer; font-family: inherit; }
+        .cat-btn:hover, .cat-btn.active { border-color: var(--blue-primary); color: var(--text-primary); background: var(--bg-raised); }
+        .example { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+        .example-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+        .example-title { font-size: 15px; font-weight: 600; }
+        .example-meta { display: flex; gap: 12px; font-size: 12px; color: var(--text-muted); }
+        .example-prompt { font-size: 13px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 12px; padding: 12px; background: var(--bg-deep); border-radius: 6px; border: 1px solid rgba(30,58,95,0.5); }
+        .example-preview { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #e6edf3; background: #0d1117; border-radius: 6px; padding: 12px; max-height: 150px; overflow: hidden; position: relative; white-space: pre; line-height: 1.4; }
+        .example-preview::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 40px; background: linear-gradient(transparent, #0d1117); }
+        .try-btn { margin-top: 12px; padding: 8px 20px; border-radius: 6px; border: none; background: var(--blue-primary); color: white; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; }
+        .try-btn:hover { filter: brightness(1.15); }
+        .back { margin-top: 32px; text-align: center; }
+        .back a { color: var(--blue-light); text-decoration: none; font-size: 14px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="nav"><a href="index.html"><span>[</span>ODEY</a></div>
+    <h1>Examples</h1>
+    <p class="subtitle">Real prompts, real output. Click "Try this prompt" to run it yourself.</p>
+
+    <div class="categories">
+        <button class="cat-btn active" onclick="filterCat('all', this)">All</button>
+        <button class="cat-btn" onclick="filterCat('api', this)">API Endpoints</button>
+        <button class="cat-btn" onclick="filterCat('auth', this)">Authentication</button>
+        <button class="cat-btn" onclick="filterCat('db', this)">Database</button>
+        <button class="cat-btn" onclick="filterCat('frontend', this)">Frontend</button>
+        <button class="cat-btn" onclick="filterCat('cli', this)">CLI Tools</button>
+        <button class="cat-btn" onclick="filterCat('fullproject', this)">Full Projects</button>
+    </div>
+
+    <div id="examples-list">
+        <div class="example" data-cat="api auth">
+            <div class="example-header">
+                <div class="example-title">JWT Authentication Endpoint</div>
+                <div class="example-meta"><span>~50 lines</span><span>1 credit</span></div>
+            </div>
+            <div class="example-prompt">Build a FastAPI endpoint for user authentication with JWT. Include signup, login, and a protected /me route. Use bcrypt for password hashing.</div>
+            <div class="example-preview">from fastapi import FastAPI, Depends, HTTPException
+from fastapi.security import OAuth2PasswordBearer
+import bcrypt
+import jwt
+
+app = FastAPI()
+SECRET_KEY = "your-secret-key"
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+
+@app.post("/signup")
+async def signup(email: str, password: str):
+    hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt())
+    # Store user in database...</div>
+            <button class="try-btn" onclick="tryPrompt('Build a FastAPI endpoint for user authentication with JWT. Include signup, login, and a protected /me route. Use bcrypt for password hashing.')">Try this prompt</button>
+        </div>
+
+        <div class="example" data-cat="db api">
+            <div class="example-header">
+                <div class="example-title">CRUD API with PostgreSQL</div>
+                <div class="example-meta"><span>~80 lines</span><span>1-3 credits</span></div>
+            </div>
+            <div class="example-prompt">Write a FastAPI app with full CRUD endpoints for a blog. Posts have title, content, author, and created_at. Use SQLAlchemy with PostgreSQL. Include pagination.</div>
+            <div class="example-preview">from fastapi import FastAPI, Query
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime
+from sqlalchemy.orm import Session, declarative_base
+from datetime import datetime
+
+Base = declarative_base()
+
+class Post(Base):
+    __tablename__ = "posts"
+    id = Column(Integer, primary_key=True)
+    title = Column(String(200), nullable=False)
+    content = Column(Text, nullable=False)
+    author = Column(String(100))
+    created_at = Column(DateTime, default=datetime.utcnow)</div>
+            <button class="try-btn" onclick="tryPrompt('Write a FastAPI app with full CRUD endpoints for a blog. Posts have title, content, author, and created_at. Use SQLAlchemy with PostgreSQL. Include pagination.')">Try this prompt</button>
+        </div>
+
+        <div class="example" data-cat="frontend">
+            <div class="example-header">
+                <div class="example-title">Dark Theme Dashboard</div>
+                <div class="example-meta"><span>~120 lines</span><span>1-3 credits</span></div>
+            </div>
+            <div class="example-prompt">Write a single HTML file for a dark-themed admin dashboard. Include a sidebar with nav links, a stats row with 4 cards, a data table with sorting, and a chart placeholder. All CSS inline.</div>
+            <div class="example-preview">&lt;!DOCTYPE html&gt;
+&lt;html lang="en"&gt;
+&lt;head&gt;
+    &lt;meta charset="UTF-8"&gt;
+    &lt;title&gt;Admin Dashboard&lt;/title&gt;
+    &lt;style&gt;
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: system-ui; background: #0a0a0a; color: #fff; }
+        .sidebar { width: 240px; position: fixed; height: 100vh; background: #111; }
+        .main { margin-left: 240px; padding: 24px; }</div>
+            <button class="try-btn" onclick="tryPrompt('Write a single HTML file for a dark-themed admin dashboard. Include a sidebar with nav links, a stats row with 4 cards, a data table with sorting, and a chart placeholder. All CSS inline.')">Try this prompt</button>
+        </div>
+
+        <div class="example" data-cat="cli">
+            <div class="example-header">
+                <div class="example-title">CLI Todo Manager</div>
+                <div class="example-meta"><span>~60 lines</span><span>1 credit</span></div>
+            </div>
+            <div class="example-prompt">Write a Python CLI todo list manager using argparse. Commands: add, list, done, delete. Store todos in a JSON file. Include colored output with ANSI codes.</div>
+            <div class="example-preview">import argparse
+import json
+import os
+
+TODO_FILE = os.path.expanduser("~/.todos.json")
+
+def load_todos():
+    if os.path.exists(TODO_FILE):
+        with open(TODO_FILE) as f:
+            return json.load(f)
+    return []
+
+def save_todos(todos):
+    with open(TODO_FILE, 'w') as f:
+        json.dump(todos, f, indent=2)</div>
+            <button class="try-btn" onclick="tryPrompt('Write a Python CLI todo list manager using argparse. Commands: add, list, done, delete. Store todos in a JSON file. Include colored output with ANSI codes.')">Try this prompt</button>
+        </div>
+
+        <div class="example" data-cat="fullproject">
+            <div class="example-header">
+                <div class="example-title">Full SaaS Starter (Build Mode)</div>
+                <div class="example-meta"><span>~500 lines</span><span>40-60 credits</span></div>
+            </div>
+            <div class="example-prompt">Build a complete SaaS starter with user authentication, Stripe billing, a dashboard with usage stats, and a REST API. Use FastAPI + React + PostgreSQL + Docker.</div>
+            <div class="example-preview">// This is a Build Mode project — generates 15+ files across 5 phases
+// Phase 1: Database models + migrations
+// Phase 2: Auth + JWT + password reset
+// Phase 3: Stripe integration + plans + webhooks
+// Phase 4: Dashboard + API endpoints
+// Phase 5: Docker + deployment config
+// Estimated: 40-60 credits, 8-12 minutes</div>
+            <button class="try-btn" onclick="window.location.href='build.html'">Try in Build Mode</button>
+        </div>
+
+        <div class="example" data-cat="api">
+            <div class="example-header">
+                <div class="example-title">WebSocket Chat Server</div>
+                <div class="example-meta"><span>~70 lines</span><span>1-3 credits</span></div>
+            </div>
+            <div class="example-prompt">Write a Python WebSocket chat server using FastAPI. Support multiple rooms, user nicknames, message broadcasting, and connection/disconnection notifications.</div>
+            <div class="example-preview">from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from typing import Dict, List
+
+app = FastAPI()
+
+class ConnectionManager:
+    def __init__(self):
+        self.rooms: Dict[str, List[WebSocket]] = {}
+
+    async def connect(self, room: str, ws: WebSocket, nickname: str):
+        await ws.accept()
+        if room not in self.rooms:
+            self.rooms[room] = []
+        self.rooms[room].append(ws)</div>
+            <button class="try-btn" onclick="tryPrompt('Write a Python WebSocket chat server using FastAPI. Support multiple rooms, user nicknames, message broadcasting, and connection/disconnection notifications.')">Try this prompt</button>
+        </div>
+    </div>
+
+    <div class="back"><a href="index.html">&larr; Back to Codey</a></div>
+</div>
+
+<script>
+function filterCat(cat, btn) {
+    document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('.example').forEach(ex => {
+        if (cat === 'all' || ex.dataset.cat.includes(cat)) {
+            ex.style.display = '';
+        } else {
+            ex.style.display = 'none';
+        }
+    });
+}
+
+function tryPrompt(prompt) {
+    localStorage.setItem('codey_try_prompt', prompt);
+    window.location.href = 'dashboard.html';
+}
+
+// On dashboard load, check for try_prompt
+if (window.location.pathname.includes('dashboard')) {
+    const saved = localStorage.getItem('codey_try_prompt');
+    if (saved) {
+        localStorage.removeItem('codey_try_prompt');
+        document.getElementById('prompt-input').value = saved;
+    }
+}
+</script>
+</body>
+</html>

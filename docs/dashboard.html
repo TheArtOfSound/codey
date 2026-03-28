@@ -248,6 +248,14 @@ if (!token) {
     });
 }
 
+// Check for try_prompt from examples page
+const savedPrompt = localStorage.getItem('codey_try_prompt');
+if (savedPrompt) {
+    localStorage.removeItem('codey_try_prompt');
+    document.getElementById('prompt-input').value = savedPrompt;
+    document.getElementById('prompt-input').dispatchEvent(new Event('input', {bubbles: true}));
+}
+
 // Prompt handling
 function setPrompt(text) {
     document.getElementById('prompt-input').value = text;
