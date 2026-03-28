@@ -69,19 +69,18 @@ PROVIDERS: dict[str, dict[str, str]] = {
 # ---------------------------------------------------------------------------
 
 MODELS: dict[str, dict[str, str]] = {
-    "fast_code": {"provider": "groq", "model": "deepseek-r1-distill-qwen-32b"},
-    "code_generation": {"provider": "deepseek", "model": "deepseek-coder"},
-    "code_review": {"provider": "gemini", "model": "gemini-2.0-flash"},
-    "architecture": {"provider": "groq", "model": "deepseek-r1-distill-llama-70b"},
-    "documentation": {"provider": "gemini", "model": "gemini-2.0-flash-lite"},
-    "test_generation": {
-        "provider": "openrouter",
-        "model": "qwen/qwen-2.5-coder-32b-instruct",
-    },
-    "debugging": {"provider": "anthropic", "model": "claude-sonnet-4-6"},
-    "security_audit": {"provider": "deepseek", "model": "deepseek-reasoner"},
-    "long_context": {"provider": "gemini", "model": "gemini-2.5-pro-preview-06-05"},
-    "default": {"provider": "anthropic", "model": "claude-sonnet-4-6"},
+    # All routes use OpenRouter free models until other provider keys are added.
+    # When Groq/Gemini/DeepSeek keys are set, resolve_model() will prefer them.
+    "fast_code": {"provider": "openrouter", "model": "meta-llama/llama-3.3-70b-instruct:free"},
+    "code_generation": {"provider": "openrouter", "model": "meta-llama/llama-3.3-70b-instruct:free"},
+    "code_review": {"provider": "openrouter", "model": "meta-llama/llama-3.3-70b-instruct:free"},
+    "architecture": {"provider": "openrouter", "model": "meta-llama/llama-3.3-70b-instruct:free"},
+    "documentation": {"provider": "openrouter", "model": "meta-llama/llama-3.3-70b-instruct:free"},
+    "test_generation": {"provider": "openrouter", "model": "meta-llama/llama-3.3-70b-instruct:free"},
+    "debugging": {"provider": "openrouter", "model": "meta-llama/llama-3.3-70b-instruct:free"},
+    "security_audit": {"provider": "openrouter", "model": "meta-llama/llama-3.3-70b-instruct:free"},
+    "long_context": {"provider": "openrouter", "model": "meta-llama/llama-3.3-70b-instruct:free"},
+    "default": {"provider": "openrouter", "model": "meta-llama/llama-3.3-70b-instruct:free"},
 }
 
 # ---------------------------------------------------------------------------
