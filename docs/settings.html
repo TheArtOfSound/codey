@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings — Codey</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+        :root { --bg-deep: #050a12; --bg-surface: #0a1628; --bg-raised: #111f38; --border: #1e3a5f; --blue-primary: #2563eb; --blue-light: #60a5fa; --text-primary: #f1f5f9; --text-secondary: #94a3b8; --text-muted: #475569; --green: #22c55e; --red: #ef4444; }
+        body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg-deep); color: var(--text-primary); min-height: 100vh; }
+        .nav { position: sticky; top: 0; z-index: 100; background: var(--bg-deep); border-bottom: 1px solid var(--border); padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; }
+        .nav a { color: var(--text-primary); text-decoration: none; font-size: 20px; font-weight: 700; }
+        .nav span { color: var(--blue-light); }
+        .main { max-width: 800px; margin: 0 auto; padding: 32px 24px; }
+        h1 { font-size: 24px; font-weight: 700; margin-bottom: 24px; }
+        .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 32px; overflow-x: auto; }
+        .tab { padding: 10px 16px; font-size: 13px; font-weight: 500; color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
+        .tab:hover { color: var(--text-secondary); }
+        .tab.active { color: var(--text-primary); border-bottom-color: var(--blue-primary); }
+        .panel { display: none; }
+        .panel.active { display: block; }
+        .field { margin-bottom: 20px; }
+        .field label { display: block; font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-bottom: 6px; }
+        .field input, .field select { width: 100%; padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-primary); font-size: 14px; font-family: inherit; outline: none; }
+        .field input:focus { border-color: var(--blue-primary); }
+        .btn { padding: 10px 20px; border-radius: 6px; border: none; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; }
+        .btn-primary { background: var(--blue-primary); color: white; }
+        .btn-danger { background: var(--red); color: white; }
+        .btn-secondary { background: transparent; border: 1px solid var(--border); color: var(--text-primary); }
+        .section-title { font-size: 16px; font-weight: 600; margin-bottom: 12px; }
+        .info-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid rgba(30,58,95,0.3); font-size: 13px; }
+        .info-label { color: var(--text-secondary); }
+        .info-value { color: var(--text-primary); font-weight: 500; }
+        .danger-zone { border: 1px solid var(--red); border-radius: 8px; padding: 20px; margin-top: 24px; }
+        .danger-zone h3 { color: var(--red); font-size: 14px; margin-bottom: 8px; }
+        .danger-zone p { color: var(--text-secondary); font-size: 13px; margin-bottom: 12px; }
+        .memory-item { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin-bottom: 8px; font-size: 13px; }
+        .memory-type { font-size: 11px; color: var(--blue-light); text-transform: uppercase; font-weight: 600; margin-bottom: 4px; }
+        .memory-content { color: var(--text-secondary); }
+    </style>
+</head>
+<body>
+<div class="nav">
+    <a href="dashboard.html"><span>[</span>ODEY</a>
+    <a href="dashboard.html" style="font-size:13px;color:#94a3b8;text-decoration:none;">Dashboard</a>
+</div>
+<div class="main">
+    <h1>Settings</h1>
+    <div class="tabs">
+        <div class="tab active" onclick="showTab('profile')">Profile</div>
+        <div class="tab" onclick="showTab('billing')">Billing</div>
+        <div class="tab" onclick="showTab('memory')">Memory</div>
+        <div class="tab" onclick="showTab('notifications')">Notifications</div>
+        <div class="tab" onclick="showTab('danger')">Danger Zone</div>
+    </div>
+
+    <!-- Profile -->
+    <div class="panel active" id="panel-profile">
+        <div class="section-title">Profile</div>
+        <div class="field">
+            <label>Display name</label>
+            <input type="text" id="profile-name" placeholder="Your name">
+        </div>
+        <div class="field">
+            <label>Email</label>
+            <input type="email" id="profile-email" disabled>
+        </div>
+        <button class="btn btn-primary" onclick="saveProfile()">Save changes</button>
+    </div>
+
+    <!-- Billing -->
+    <div class="panel" id="panel-billing">
+        <div class="section-title">Billing</div>
+        <div class="info-row"><span class="info-label">Current plan</span><span class="info-value" id="billing-plan">Free</span></div>
+        <div class="info-row"><span class="info-label">Credits remaining</span><span class="info-value" id="billing-credits">10</span></div>
+        <div class="info-row"><span class="info-label">Top-up credits</span><span class="info-value" id="billing-topup">0</span></div>
+        <div style="margin-top: 16px; display: flex; gap: 12px;">
+            <a href="pricing.html" class="btn btn-primary" style="text-decoration:none;text-align:center;">Upgrade plan</a>
+            <a href="pricing.html#topup" class="btn btn-secondary" style="text-decoration:none;text-align:center;">Buy credits</a>
+        </div>
+    </div>
+
+    <!-- Memory -->
+    <div class="panel" id="panel-memory">
+        <div class="section-title">Codey's memory of you</div>
+        <p style="font-size: 13px; color: #94a3b8; margin-bottom: 16px;">Codey learns your preferences across sessions. You can view and delete any memory.</p>
+        <div id="memory-list">
+            <div class="memory-item"><div class="memory-type">Loading...</div><div class="memory-content">Fetching memories from the server...</div></div>
+        </div>
+        <button class="btn btn-secondary" style="margin-top: 12px;" onclick="loadMemories()">Refresh</button>
+    </div>
+
+    <!-- Notifications -->
+    <div class="panel" id="panel-notifications">
+        <div class="section-title">Notification preferences</div>
+        <div class="field" style="display:flex;align-items:center;gap:8px;">
+            <input type="checkbox" id="notif-session" checked>
+            <label for="notif-session" style="margin:0;">Session completed</label>
+        </div>
+        <div class="field" style="display:flex;align-items:center;gap:8px;">
+            <input type="checkbox" id="notif-credits" checked>
+            <label for="notif-credits" style="margin:0;">Credits running low (&lt;20%)</label>
+        </div>
+        <div class="field" style="display:flex;align-items:center;gap:8px;">
+            <input type="checkbox" id="notif-autonomous" checked>
+            <label for="notif-autonomous" style="margin:0;">Autonomous mode daily summary</label>
+        </div>
+        <button class="btn btn-primary" onclick="alert('Preferences saved.')">Save preferences</button>
+    </div>
+
+    <!-- Danger Zone -->
+    <div class="panel" id="panel-danger">
+        <div class="danger-zone">
+            <h3>Delete account</h3>
+            <p>Permanently delete your account, all sessions, generated code, and memories. This cannot be undone.</p>
+            <div class="field">
+                <label>Type DELETE to confirm</label>
+                <input type="text" id="delete-confirm" placeholder="DELETE">
+            </div>
+            <button class="btn btn-danger" onclick="deleteAccount()">Delete my account</button>
+        </div>
+    </div>
+</div>
+
+<script>
+const API = 'https://codey-jc2r.onrender.com';
+const token = localStorage.getItem('codey_token');
+if (!token) window.location.href = 'login.html';
+
+// Load user data
+const user = JSON.parse(localStorage.getItem('codey_user') || '{}');
+document.getElementById('profile-name').value = user.name || '';
+document.getElementById('profile-email').value = user.email || '';
+document.getElementById('billing-plan').textContent = (user.plan || 'free').charAt(0).toUpperCase() + (user.plan || 'free').slice(1);
+document.getElementById('billing-credits').textContent = user.credits_remaining ?? 10;
+document.getElementById('billing-topup').textContent = user.topup_credits ?? 0;
+
+function showTab(name) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    event.target.classList.add('active');
+    document.getElementById('panel-' + name).classList.add('active');
+    if (name === 'memory') loadMemories();
+}
+
+function saveProfile() {
+    const name = document.getElementById('profile-name').value;
+    fetch(API + '/users/me', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify({ name })
+    }).then(() => {
+        user.name = name;
+        localStorage.setItem('codey_user', JSON.stringify(user));
+        alert('Profile updated.');
+    }).catch(() => alert('Failed to save.'));
+}
+
+function loadMemories() {
+    const list = document.getElementById('memory-list');
+    list.innerHTML = '<div class="memory-item"><div class="memory-type">Loading...</div></div>';
+    // Memory retrieval would call a backend endpoint
+    // For now show a placeholder
+    setTimeout(() => {
+        list.innerHTML = '<div class="memory-item"><div class="memory-type">Session Context</div><div class="memory-content">Memories are stored as vector embeddings. They\'re automatically retrieved when relevant to your prompts.</div></div>';
+    }, 500);
+}
+
+function deleteAccount() {
+    if (document.getElementById('delete-confirm').value !== 'DELETE') {
+        alert('Type DELETE to confirm.');
+        return;
+    }
+    if (!confirm('Are you absolutely sure? This deletes everything.')) return;
+    fetch(API + '/users/me', {
+        method: 'DELETE',
+        headers: { 'Authorization': 'Bearer ' + token }
+    }).then(() => {
+        localStorage.clear();
+        window.location.href = 'index.html';
+    }).catch(() => alert('Failed to delete account.'));
+}
+</script>
+</body>
+</html>

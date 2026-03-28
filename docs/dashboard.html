@@ -507,7 +507,9 @@ document.getElementById('prompt-input').addEventListener('keydown', function(e) 
 
 // User menu (simple logout)
 document.getElementById('user-menu-btn').addEventListener('click', function() {
-    if (confirm('Sign out?')) {
+    const choice = prompt('Menu:\n1 = Settings\n2 = Sign out\n\nEnter 1 or 2:');
+    if (choice === '1') window.location.href = 'settings.html';
+    if (choice === '2') {
         localStorage.removeItem('codey_token');
         localStorage.removeItem('codey_user');
         window.location.href = 'index.html';
