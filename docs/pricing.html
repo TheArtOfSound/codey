@@ -198,7 +198,7 @@ function subscribe(plan) {
     fetch(API + '/billing/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-        body: JSON.stringify({ plan_key: plan })
+        body: JSON.stringify({ plan: plan })
     })
     .then(r => {
         if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Subscription failed'); });
