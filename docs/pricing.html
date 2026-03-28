@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pricing — Codey</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-deep: #050a12; --bg-surface: #0a1628; --bg-raised: #111f38;
+            --border: #1e3a5f; --blue-primary: #2563eb; --blue-light: #60a5fa;
+            --text-primary: #f1f5f9; --text-secondary: #94a3b8; --text-muted: #475569;
+            --green: #22c55e; --red: #ef4444;
+        }
+        body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg-deep); color: var(--text-primary); min-height: 100vh; padding: 24px; }
+        .container { max-width: 1100px; margin: 0 auto; }
+        .logo { font-size: 20px; font-weight: 700; color: var(--text-primary); text-decoration: none; display: inline-block; margin-bottom: 48px; }
+        .logo span { color: var(--blue-light); }
+        h1 { font-size: 32px; font-weight: 700; text-align: center; margin-bottom: 8px; }
+        .subtitle { text-align: center; color: var(--text-secondary); font-size: 16px; margin-bottom: 48px; }
+
+        /* Plan grid */
+        .plan-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 48px; }
+        .plan-card { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; padding: 28px 20px; display: flex; flex-direction: column; }
+        .plan-card.featured { border-left: 3px solid var(--blue-primary); }
+        .plan-name { font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 12px; }
+        .plan-price { font-size: 40px; font-weight: 700; margin-bottom: 4px; }
+        .plan-price .period { font-size: 14px; font-weight: 400; color: var(--text-muted); }
+        .plan-desc { font-size: 13px; color: var(--text-secondary); margin-bottom: 20px; }
+        .plan-features { list-style: none; flex: 1; margin-bottom: 24px; }
+        .plan-features li { font-size: 13px; color: var(--text-secondary); padding: 5px 0; padding-left: 20px; position: relative; }
+        .plan-features li::before { content: '\2713'; position: absolute; left: 0; color: var(--green); font-weight: 600; }
+        .plan-btn { width: 100%; padding: 10px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; text-align: center; text-decoration: none; display: block; font-family: inherit; transition: all 150ms; }
+        .plan-btn-primary { background: var(--blue-primary); color: white; border: none; }
+        .plan-btn-primary:hover { filter: brightness(1.15); }
+        .plan-btn-secondary { background: transparent; color: var(--text-primary); border: 1px solid var(--border); }
+        .plan-btn-secondary:hover { border-color: var(--blue-primary); background: var(--bg-raised); }
+        .plan-btn-current { background: var(--bg-raised); color: var(--text-muted); border: 1px solid var(--border); cursor: default; }
+
+        /* Top-up section */
+        .topup-section { margin-bottom: 48px; }
+        .topup-section h2 { font-size: 20px; font-weight: 600; margin-bottom: 16px; }
+        .topup-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+        .topup-card { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px; text-align: center; cursor: pointer; transition: all 150ms; }
+        .topup-card:hover { border-color: var(--blue-primary); background: var(--bg-raised); }
+        .topup-credits { font-size: 28px; font-weight: 700; color: var(--text-primary); }
+        .topup-price { font-size: 16px; color: var(--text-secondary); margin: 4px 0; }
+        .topup-per { font-size: 12px; color: var(--text-muted); margin-bottom: 12px; }
+        .topup-btn { width: 100%; padding: 8px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--text-primary); font-size: 13px; font-weight: 500; cursor: pointer; font-family: inherit; }
+        .topup-btn:hover { border-color: var(--blue-primary); }
+
+        /* Credits note */
+        .credits-note { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 48px; }
+        .credits-note h3 { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+        .credits-note p { font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
+
+        .back-link { text-align: center; margin-top: 24px; }
+        .back-link a { color: var(--blue-light); text-decoration: none; font-size: 14px; }
+
+        @media (max-width: 768px) {
+            .plan-grid, .topup-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <a href="index.html" class="logo"><span>[</span>ODEY</a>
+
+    <h1>Simple, honest pricing.</h1>
+    <p class="subtitle">Pay for what you use. Upgrade or buy credits anytime.</p>
+
+    <!-- Plans -->
+    <div class="plan-grid">
+        <div class="plan-card">
+            <div class="plan-name">Free</div>
+            <div class="plan-price">$0</div>
+            <div class="plan-desc">Try Codey with 10 credits/month</div>
+            <ul class="plan-features">
+                <li>10 credits/month</li>
+                <li>Code generation</li>
+                <li>Structural health</li>
+                <li>Community support</li>
+            </ul>
+            <span class="plan-btn plan-btn-current" id="plan-free-btn">Current plan</span>
+        </div>
+
+        <div class="plan-card">
+            <div class="plan-name">Starter</div>
+            <div class="plan-price">$19<span class="period">/mo</span></div>
+            <div class="plan-desc">100 credits for serious builders</div>
+            <ul class="plan-features">
+                <li>100 credits/month</li>
+                <li>50 credit rollover</li>
+                <li>1 GitHub repo</li>
+                <li>Full health analysis</li>
+                <li>Email support</li>
+            </ul>
+            <button class="plan-btn plan-btn-primary" onclick="subscribe('starter')">Upgrade to Starter</button>
+        </div>
+
+        <div class="plan-card featured">
+            <div class="plan-name">Pro</div>
+            <div class="plan-price">$49<span class="period">/mo</span></div>
+            <div class="plan-desc">400 credits for power users</div>
+            <ul class="plan-features">
+                <li>400 credits/month</li>
+                <li>200 credit rollover</li>
+                <li>5 GitHub repos</li>
+                <li>Autonomous mode</li>
+                <li>Priority processing</li>
+                <li>API access</li>
+            </ul>
+            <button class="plan-btn plan-btn-primary" onclick="subscribe('pro')">Upgrade to Pro</button>
+        </div>
+
+        <div class="plan-card">
+            <div class="plan-name">Team</div>
+            <div class="plan-price">$149<span class="period">/mo</span></div>
+            <div class="plan-desc">1,500 credits for teams</div>
+            <ul class="plan-features">
+                <li>1,500 credits/month</li>
+                <li>750 credit rollover</li>
+                <li>Unlimited repos</li>
+                <li>Autonomous mode</li>
+                <li>Up to 10 seats</li>
+                <li>Priority support</li>
+            </ul>
+            <button class="plan-btn plan-btn-secondary" onclick="subscribe('team')">Upgrade to Team</button>
+        </div>
+    </div>
+
+    <!-- Top-ups -->
+    <div class="topup-section">
+        <h2>Credit top-ups — never expire</h2>
+        <div class="topup-grid">
+            <div class="topup-card" onclick="buyTopup(50, 900)">
+                <div class="topup-credits">50</div>
+                <div class="topup-price">$9</div>
+                <div class="topup-per">$0.18/credit</div>
+                <button class="topup-btn">Buy credits</button>
+            </div>
+            <div class="topup-card" onclick="buyTopup(200, 2900)">
+                <div class="topup-credits">200</div>
+                <div class="topup-price">$29</div>
+                <div class="topup-per">$0.145/credit</div>
+                <button class="topup-btn">Buy credits</button>
+            </div>
+            <div class="topup-card" onclick="buyTopup(600, 6900)">
+                <div class="topup-credits">600</div>
+                <div class="topup-price">$69</div>
+                <div class="topup-per">$0.115/credit</div>
+                <button class="topup-btn">Buy credits</button>
+            </div>
+            <div class="topup-card" onclick="buyTopup(2000, 19900)">
+                <div class="topup-credits">2,000</div>
+                <div class="topup-price">$199</div>
+                <div class="topup-per">$0.10/credit</div>
+                <button class="topup-btn">Buy credits</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Credits explanation -->
+    <div class="credits-note">
+        <h3>How credits work</h3>
+        <p>Every action in Codey costs credits. Simple code generation costs 1 credit. Medium tasks cost 3. Full project builds cost 20-60.
+        Subscription credits reset monthly. Top-up credits never expire and carry forward indefinitely.
+        If you run out, you'll see a clear message with options to buy more — no surprise charges, no interruptions.</p>
+    </div>
+
+    <div class="back-link">
+        <a href="dashboard.html">&larr; Back to dashboard</a>
+    </div>
+</div>
+
+<script>
+const API = 'https://codey-jc2r.onrender.com';
+const token = localStorage.getItem('codey_token');
+
+// Update plan buttons based on user's current plan
+if (token) {
+    const userStr = localStorage.getItem('codey_user');
+    try {
+        const user = JSON.parse(userStr);
+        if (user && user.plan && user.plan !== 'free') {
+            const btn = document.getElementById('plan-free-btn');
+            if (btn) { btn.textContent = 'Free tier'; btn.className = 'plan-btn plan-btn-secondary'; }
+        }
+    } catch(e) {}
+}
+
+function subscribe(plan) {
+    if (!token) { window.location.href = 'signup.html?plan=' + plan; return; }
+
+    fetch(API + '/billing/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify({ plan_key: plan })
+    })
+    .then(r => {
+        if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Subscription failed'); });
+        return r.json();
+    })
+    .then(data => {
+        if (data.checkout_url) {
+            window.location.href = data.checkout_url;
+        } else {
+            alert('Subscription created. Redirecting to dashboard.');
+            window.location.href = 'dashboard.html';
+        }
+    })
+    .catch(err => alert(err.message));
+}
+
+function buyTopup(credits, priceInCents) {
+    if (!token) { window.location.href = 'signup.html'; return; }
+
+    fetch(API + '/billing/topup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify({ credits: credits })
+    })
+    .then(r => {
+        if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Top-up failed'); });
+        return r.json();
+    })
+    .then(data => {
+        if (data.checkout_url) {
+            window.location.href = data.checkout_url;
+        } else {
+            alert(credits + ' credits added to your account.');
+            window.location.href = 'dashboard.html';
+        }
+    })
+    .catch(err => alert(err.message));
+}
+</script>
+</body>
+</html>
