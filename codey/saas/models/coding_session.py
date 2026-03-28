@@ -53,8 +53,6 @@ class CodingSession(Base):
     )
     completed_at: Mapped[Optional[datetime]] = mapped_column()
 
-    # Remove inherited created_at — this model uses started_at instead
-    created_at: Mapped[None] = None  # type: ignore[assignment]
 
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="coding_sessions")

@@ -1,22 +1,9 @@
 
-import uuid
-from datetime import datetime
-
-from sqlalchemy import text
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase
 
 
 class Base(DeclarativeBase):
-    __abstract__ = True
+    """Abstract base. Each model defines its own PK and timestamp columns
+    to match its specific database schema."""
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        server_default=text("gen_random_uuid()"),
-        default=uuid.uuid4,
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        server_default=text("now()"),
-        nullable=False,
-    )
+    __abstract__ = True

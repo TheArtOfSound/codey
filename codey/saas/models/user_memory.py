@@ -13,8 +13,6 @@ from codey.saas.models.base import Base
 class UserMemory(Base):
     __tablename__ = "user_memory"
 
-    # Override Base.id — this table is keyed by user_id, not a separate id
-    id: Mapped[None] = None  # type: ignore[assignment]
 
 
     user_id: Mapped[uuid.UUID] = mapped_column(

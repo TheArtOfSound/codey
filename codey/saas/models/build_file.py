@@ -16,7 +16,6 @@ if TYPE_CHECKING:
 class BuildFile(Base):
     __tablename__ = "build_files"
 
-    created_at: Mapped[None] = None  # type: ignore[assignment]
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),

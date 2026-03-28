@@ -19,8 +19,6 @@ if TYPE_CHECKING:
 class BuildProject(Base):
     __tablename__ = "build_projects"
 
-    # Remove inherited created_at — this model uses started_at instead
-    created_at: Mapped[None] = None  # type: ignore[assignment]
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),

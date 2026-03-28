@@ -16,7 +16,6 @@ if TYPE_CHECKING:
 class BuildCheckpoint(Base):
     __tablename__ = "build_checkpoints"
 
-    created_at: Mapped[None] = None  # type: ignore[assignment]
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
