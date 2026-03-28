@@ -31,3 +31,4 @@ flower>=2.0.0
 sentry-sdk[fastapi]>=1.40.0
 cohere>=5.0.0
 pgvector>=0.3.0
+# Fri Mar 27 23:35:46 MST 2026
