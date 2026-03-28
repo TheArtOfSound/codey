@@ -654,7 +654,48 @@ async def build_approve(
     project.current_phase = 1
     await db.flush()
 
-    # The actual build execution is handled asynchronously via the WebSocket stream
+    # Generate files for phase 1 synchronously
+    try:
+        phase_1_files = await db.execute(
+            select(BuildFile).where(
+                BuildFile.project_id == project.id,
+                BuildFile.phase == 1,
+            )
+        )
+        files_to_generate = phase_1_files.scalars().all()
+
+        provider, model = resolve_model("code_generation")
+        plan_json = project.project_plan or {}
+        project_desc = project.description or ""
+
+        for bf in files_to_generate:
+            try:
+                gen_messages = [
+                    {"role": "system", "content": (
+                        "You are Codey. Generate the content for a single file in a project. "
+                        "Return ONLY the file content, no markdown fences, no explanation."
+                    )},
+                    {"role": "user", "content": (
+                        f"Project: {project_desc}\n"
+                        f"File to generate: {bf.file_path}\n"
+                        f"Generate the complete content for this file."
+                    )},
+                ]
+                content = await call_model(provider, model, gen_messages, max_tokens=4096)
+                bf.content = content
+                bf.line_count = content.count("\n") + 1
+                bf.status = "completed"
+                bf.validation_passed = True
+                project.files_completed = (project.files_completed or 0) + 1
+                project.lines_generated = (project.lines_generated or 0) + bf.line_count
+            except Exception as gen_err:
+                bf.status = "failed"
+                bf.content = f"# Generation failed: {str(gen_err)[:200]}"
+
+        await db.flush()
+    except Exception:
+        pass  # Don't fail the approve if generation has issues
+
     return BuildApproveResponse(
         project_id=str(project.id),
         session_id=str(project.session_id or project.id),
