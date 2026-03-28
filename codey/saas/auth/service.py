@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import bcrypt
 import stripe
 from fastapi import HTTPException, status
-from passlib.context import CryptContext
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,8 +12,6 @@ from codey.saas.auth.jwt import create_access_token, decode_access_token
 from codey.saas.auth.oauth import exchange_github_code, exchange_google_code
 from codey.saas.config import settings
 from codey.saas.models import User
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Configure the Stripe library once at import time
 stripe.api_key = settings.stripe_secret_key
@@ -31,11 +29,12 @@ class AuthService:
 
     @staticmethod
     def _hash_password(password: str) -> str:
-        return pwd_context.hash(password)
+        salt = bcrypt.gensalt(rounds=12)
+        return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
 
     @staticmethod
     def _verify_password(plain: str, hashed: str) -> bool:
-        return pwd_context.verify(plain, hashed)
+        return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
 
     @staticmethod
     def _make_token(user: User) -> str:
