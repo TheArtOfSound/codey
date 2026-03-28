@@ -654,31 +654,40 @@ async def build_approve(
     project.current_phase = 1
     await db.flush()
 
-    # Generate files for phase 1 synchronously
+    # Generate ALL files across all phases
     try:
-        phase_1_files = await db.execute(
+        all_files_result = await db.execute(
             select(BuildFile).where(
                 BuildFile.project_id == project.id,
-                BuildFile.phase == 1,
-            )
+            ).order_by(BuildFile.phase)
         )
-        files_to_generate = phase_1_files.scalars().all()
+        all_files = all_files_result.scalars().all()
 
         provider, model = resolve_model("code_generation")
-        plan_json = project.project_plan or {}
         project_desc = project.description or ""
+        generated_context: list[str] = []  # Track what's been built for context
 
-        for bf in files_to_generate:
+        for bf in all_files:
             try:
+                # Build context from previously generated files
+                context_summary = ""
+                if generated_context:
+                    context_summary = "\n\nAlready generated files:\n" + "\n".join(
+                        f"- {ctx}" for ctx in generated_context[-10:]  # Last 10 for context window
+                    )
+
                 gen_messages = [
                     {"role": "system", "content": (
-                        "You are Codey. Generate the content for a single file in a project. "
-                        "Return ONLY the file content, no markdown fences, no explanation."
+                        "You are Codey, generating files for a complete project. "
+                        "Return ONLY the file content. No markdown fences. No explanation. "
+                        "The code must be production-quality, with proper imports, "
+                        "error handling, type hints, and consistent with other project files."
                     )},
                     {"role": "user", "content": (
                         f"Project: {project_desc}\n"
                         f"File to generate: {bf.file_path}\n"
-                        f"Generate the complete content for this file."
+                        f"{context_summary}\n"
+                        f"Generate the complete, production-ready content for {bf.file_path}."
                     )},
                 ]
                 content = await call_model(provider, model, gen_messages, max_tokens=4096)
@@ -688,10 +697,16 @@ async def build_approve(
                 bf.validation_passed = True
                 project.files_completed = (project.files_completed or 0) + 1
                 project.lines_generated = (project.lines_generated or 0) + bf.line_count
+
+                # Add to context for next files
+                generated_context.append(f"{bf.file_path} ({bf.line_count} lines)")
+
             except Exception as gen_err:
                 bf.status = "failed"
                 bf.content = f"# Generation failed: {str(gen_err)[:200]}"
 
+        project.status = "completed"
+        project.completed_at = datetime.utcnow()
         await db.flush()
     except Exception:
         pass  # Don't fail the approve if generation has issues

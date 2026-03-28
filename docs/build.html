@@ -221,6 +221,52 @@ function cancelPlan() {
     currentPlan = null;
 }
 
+function pollBuild(projectId) {
+    const output = document.getElementById('build-output');
+    const progress = document.getElementById('progress-fill');
+    const statusEl = document.getElementById('build-status');
+    let pollCount = 0;
+
+    const interval = setInterval(() => {
+        pollCount++;
+        fetch(API + '/build/' + projectId, {
+            headers: { 'Authorization': 'Bearer ' + token }
+        })
+        .then(r => r.json())
+        .then(proj => {
+            const total = proj.files_planned || 1;
+            const done = proj.files_completed || 0;
+            const pct = Math.min(100, Math.round((done / total) * 100));
+            progress.style.width = pct + '%';
+            statusEl.textContent = `Phase ${proj.current_phase || 1} — ${done}/${total} files generated (${proj.lines_generated || 0} lines)`;
+
+            if (proj.status === 'completed' || done >= total) {
+                clearInterval(interval);
+                progress.style.width = '100%';
+                statusEl.textContent = `Build complete! ${done} files, ${proj.lines_generated || 0} lines generated.`;
+                output.textContent += `\n> Build complete.\n> ${done} files generated across ${proj.total_phases || 1} phases.\n> ${proj.lines_generated || 0} total lines of code.\n`;
+
+                // Fetch and display generated files
+                fetch(API + '/build/' + projectId + '/files', {
+                    headers: { 'Authorization': 'Bearer ' + token }
+                })
+                .then(r => r.json())
+                .then(files => {
+                    (files.files || files || []).forEach(f => {
+                        output.textContent += `\n// === ${f.file_path} (${f.line_count || '?'} lines) ===\n`;
+                        output.textContent += (f.content || '// empty') + '\n';
+                    });
+                    output.scrollTop = output.scrollHeight;
+                })
+                .catch(() => {});
+            }
+        })
+        .catch(() => {
+            if (pollCount > 60) clearInterval(interval); // Stop after 5 min
+        });
+    }, 5000); // Poll every 5 seconds
+}
+
 function approvePlan() {
     if (!currentPlan) return;
     const btn = document.getElementById('btn-approve');
@@ -240,11 +286,8 @@ function approvePlan() {
         document.getElementById('build-status').textContent = 'Build started. Generating files...';
         document.getElementById('build-output').textContent = '> Build approved. Starting phase 1...\n';
 
-        // Poll for status or show completion
-        setTimeout(() => {
-            document.getElementById('build-output').textContent += '> Files are being generated. This may take a few minutes.\n> Check back on the dashboard for completed files.\n';
-            document.getElementById('progress-fill').style.width = '10%';
-        }, 2000);
+        // Poll for build completion
+        pollBuild(currentPlan.project_id);
     })
     .catch(err => {
         alert(err.message);
