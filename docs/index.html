@@ -492,9 +492,9 @@
             <a href="/docs">Docs</a>
             <a href="/changelog">Changelog</a>
         </div>
-        <div class="nav-right">
-            <a href="/signin" class="nav-signin">Sign in</a>
-            <a href="signup.html" class="nav-cta">Start building — free</a>
+        <div class="nav-right" id="nav-right">
+            <a href="login.html" class="nav-signin" id="nav-signin">Sign in</a>
+            <a href="signup.html" class="nav-cta" id="nav-cta">Start building — free</a>
         </div>
     </div>
 </nav>
@@ -733,6 +733,16 @@
     }, { threshold: 0.1 });
 
     document.querySelectorAll('.fade-up').forEach(el => observer.observe(el));
+
+    // Auth state — show dashboard link if logged in
+    const token = localStorage.getItem('codey_token');
+    if (token) {
+        const userStr = localStorage.getItem('codey_user');
+        let name = 'User';
+        try { const u = JSON.parse(userStr); name = u.name || u.email || 'User'; } catch(e) {}
+        const navRight = document.getElementById('nav-right');
+        navRight.innerHTML = '<a href="dashboard.html" class="nav-cta">Dashboard</a>';
+    }
 </script>
 
 </body>

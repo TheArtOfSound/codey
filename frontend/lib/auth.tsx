@@ -18,8 +18,9 @@ interface AuthState {
   token: string | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<User>;
-  signup: (email: string, password: string) => Promise<User>;
+  signup: (email: string, password: string, name?: string) => Promise<User>;
   loginWithGitHub: (code: string) => Promise<User>;
+  loginWithGoogle: (code: string) => Promise<User>;
   logout: () => void;
   refreshUser: () => Promise<void>;
 }
@@ -71,8 +72,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return result.user;
   }, []);
 
-  const signup = useCallback(async (email: string, password: string) => {
-    const result = await api.signup(email, password);
+  const signup = useCallback(async (email: string, password: string, name?: string) => {
+    const result = await api.signup(email, password, name);
     setToken(result.token);
     setUser(result.user);
     return result.user;
@@ -80,6 +81,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loginWithGitHub = useCallback(async (code: string) => {
     const result = await api.loginWithGitHub(code);
+    setToken(result.token);
+    setUser(result.user);
+    return result.user;
+  }, []);
+
+  const loginWithGoogle = useCallback(async (code: string) => {
+    const result = await api.loginWithGoogle(code);
     setToken(result.token);
     setUser(result.user);
     return result.user;
@@ -100,6 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         login,
         signup,
         loginWithGitHub,
+        loginWithGoogle,
         logout,
         refreshUser,
       }}
@@ -121,7 +130,7 @@ export function useAuth(): AuthState {
 
 // ── Protected Route ────────────────────────────────────────────────────────
 
-const PUBLIC_PATHS = ["/auth/login", "/auth/signup", "/auth/github/callback", "/pricing"];
+const PUBLIC_PATHS = ["/auth/login", "/auth/signup", "/auth/callback", "/auth/forgot-password", "/auth/reset-password", "/pricing"];
 
 export function ProtectedRoute({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();

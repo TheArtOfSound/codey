@@ -46,6 +46,22 @@ PROVIDERS: dict[str, dict[str, str]] = {
         "base": "https://api.fireworks.ai/inference/v1",
         "key_env": "FIREWORKS_API_KEY",
     },
+    "cloudflare": {
+        "base": "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1",
+        "key_env": "CLOUDFLARE_API_KEY",
+    },
+    "cerebras": {
+        "base": "https://api.cerebras.ai/v1",
+        "key_env": "CEREBRAS_API_KEY",
+    },
+    "huggingface": {
+        "base": "https://api-inference.huggingface.co/v1",
+        "key_env": "HUGGINGFACE_API_KEY",
+    },
+    "cohere": {
+        "base": "https://api.cohere.ai/v1",
+        "key_env": "COHERE_API_KEY",
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -95,9 +111,15 @@ def get_client(provider: str) -> AsyncOpenAI:
             f"Provider '{provider}' requires env var {key_env} but it is not set"
         )
 
+    base_url = cfg["base"]
+    # Cloudflare requires account ID in the URL
+    if "{account_id}" in base_url:
+        account_id = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
+        base_url = base_url.replace("{account_id}", account_id)
+
     client = AsyncOpenAI(
         api_key=api_key,
-        base_url=cfg["base"],
+        base_url=base_url,
     )
     _client_cache[provider] = client
     return client

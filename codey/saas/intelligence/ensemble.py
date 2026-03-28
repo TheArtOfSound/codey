@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 
 from codey.saas.intelligence.providers import MODELS, call_model, resolve_model
 from codey.saas.intelligence.router import ExecutionMode, TaskConfig
+from codey.saas.intelligence.services import intelligence_services
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +87,9 @@ class ModelEnsemble:
         context: dict,
     ) -> ExecutionResult:
         """Call a single model and return the result."""
+        # Inject memory context if available
+        messages = await self._inject_memory_context(messages, context)
+
         provider, model = resolve_model(config.primary)
         result = await self._call_and_measure(
             provider, model, messages, config
@@ -111,6 +115,7 @@ class ModelEnsemble:
         context: dict,
     ) -> ExecutionResult:
         """Call primary and secondary models in parallel, pick the best."""
+        messages = await self._inject_memory_context(messages, context)
         primary_provider, primary_model = resolve_model(config.primary)
         tasks = [
             self._call_and_measure(primary_provider, primary_model, messages, config)
@@ -169,6 +174,7 @@ class ModelEnsemble:
         context: dict,
     ) -> ExecutionResult:
         """First call a reasoning model, then pass its plan to an impl model."""
+        messages = await self._inject_memory_context(messages, context)
         # Step 1: Reasoning
         reasoning_provider, reasoning_model = resolve_model(config.primary)
         reasoning_messages = [
@@ -308,6 +314,23 @@ class ModelEnsemble:
                     )
                 )
 
+        # --- Semgrep SAST scan (if available) ---
+        try:
+            semgrep_findings = await intelligence_services.semgrep_scan(code, language)
+            for finding in semgrep_findings:
+                severity = "warning"
+                if finding.get("severity", "").upper() in ("ERROR", "HIGH", "CRITICAL"):
+                    severity = "error"
+                issues.append(
+                    Issue(
+                        severity=severity,
+                        message=f"[Semgrep] {finding.get('rule', 'unknown')}: {finding.get('message', '')}",
+                        line=finding.get("line"),
+                    )
+                )
+        except Exception:
+            logger.debug("Semgrep integration skipped", exc_info=True)
+
         # Compute score
         error_count = sum(1 for i in issues if i.severity == "error")
         warning_count = sum(1 for i in issues if i.severity == "warning")
@@ -394,6 +417,61 @@ class ModelEnsemble:
     # -----------------------------------------------------------------------
     # Helpers
     # -----------------------------------------------------------------------
+
+    async def _inject_memory_context(
+        self,
+        messages: list[dict[str, str]],
+        context: dict,
+    ) -> list[dict[str, str]]:
+        """If user_id and db session are in context, retrieve relevant memories
+        and inject them into the system prompt."""
+        user_id = context.get("user_id")
+        db = context.get("db")
+        if not user_id or not db:
+            return messages
+
+        # Extract the user's prompt for semantic search
+        user_prompt = ""
+        for msg in reversed(messages):
+            if msg.get("role") == "user":
+                user_prompt = msg.get("content", "")
+                break
+        if not user_prompt:
+            return messages
+
+        try:
+            from codey.saas.intelligence.embeddings import embedding_service
+
+            memories = await embedding_service.search_memories(
+                db, user_id=user_id, query=user_prompt, limit=5
+            )
+            if not memories:
+                return messages
+
+            memory_text = "\n".join(
+                f"- [{m['memory_type']}] {m['content']} (relevance: {m['similarity']})"
+                for m in memories
+            )
+            memory_injection = {
+                "role": "system",
+                "content": (
+                    f"User memory context (from previous sessions):\n{memory_text}\n\n"
+                    "Use these memories to personalize the response — "
+                    "respect the user's known preferences and prior decisions."
+                ),
+            }
+
+            # Insert after the first system message, or at the start
+            injected = list(messages)
+            insert_idx = 1 if injected and injected[0].get("role") == "system" else 0
+            injected.insert(insert_idx, memory_injection)
+            logger.info(
+                "Injected %d memories for user %s", len(memories), user_id
+            )
+            return injected
+        except Exception:
+            logger.debug("Memory retrieval failed, continuing without", exc_info=True)
+            return messages
 
     async def _call_and_measure(
         self,

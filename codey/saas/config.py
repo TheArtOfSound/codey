@@ -38,17 +38,53 @@ class Settings(BaseSettings):
     cloudflare_account_id: str = ""
     huggingface_api_key: str = ""
     cohere_api_key: str = ""
+    cerebras_api_key: str = ""
 
     # Search keys
     tavily_api_key: str = ""
     brave_search_api_key: str = ""
     exa_api_key: str = ""
+    bing_search_api_key: str = ""
+    perplexity_api_key: str = ""
+
+    # Code security
+    snyk_api_key: str = ""
+    nvd_api_key: str = ""
+    libraries_io_api_key: str = ""
+    semgrep_app_token: str = ""
 
     # Sandbox
     e2b_api_key: str = ""
 
     # Monitoring
     sentry_dsn: str = ""
+
+    # Communication
+    discord_webhook_url: str = ""
+    slack_webhook_url: str = ""
+    twilio_account_sid: str = ""
+    twilio_auth_token: str = ""
+    twilio_from_number: str = ""
+
+    # Monitoring
+    betterstack_api_key: str = ""
+    uptimerobot_api_key: str = ""
+
+    # Dev tooling
+    linear_api_key: str = ""
+    vercel_token: str = ""
+    railway_token: str = ""
+
+    # Additional code security
+    sonarcloud_token: str = ""
+    aikido_api_key: str = ""
+    deepsource_token: str = ""
+
+    # GitHub integration
+    github_token: str = ""
+    github_app_id: str = ""
+    github_app_private_key: str = ""
+    github_webhook_secret: str = ""
 
     class Config:
         env_file = ".env"

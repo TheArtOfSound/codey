@@ -3,17 +3,15 @@
 import { useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { useAuth } from "@/lib/auth";
+import { api } from "@/lib/api";
 
-export default function SignupPage() {
-  const { signup } = useAuth();
+export default function ResetPasswordPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const plan = searchParams.get("plan");
+  const token = searchParams.get("token") || "";
 
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -26,33 +24,31 @@ export default function SignupPage() {
       return;
     }
 
+    if (password !== confirm) {
+      setError("Passwords do not match.");
+      return;
+    }
+
+    if (!token) {
+      setError("Missing reset token. Please use the link from your email.");
+      return;
+    }
+
     setLoading(true);
     try {
-      await signup(email, password, name || undefined);
-      // If they selected a plan, redirect to billing to complete subscription
-      if (plan && plan !== "free") {
-        router.push(`/settings/billing?subscribe=${plan}`);
-      } else {
-        router.push("/dashboard");
-      }
+      await api.confirmPasswordReset(token, password);
+      router.push("/auth/login?reset=success");
     } catch (err: unknown) {
       const apiErr = err as { detail?: string };
-      setError(apiErr.detail || "Could not create account. Please try again.");
+      setError(apiErr.detail || "Invalid or expired reset token.");
     } finally {
       setLoading(false);
     }
   }
 
-  const planLabels: Record<string, string> = {
-    starter: "Starter",
-    pro: "Pro",
-    team: "Team",
-  };
-
   return (
     <div className="flex min-h-screen items-center justify-center bg-codey-bg px-4">
       <div className="w-full max-w-md">
-        {/* Logo */}
         <Link
           href="/"
           className="mb-10 block text-center text-2xl font-bold tracking-tight"
@@ -60,20 +56,12 @@ export default function SignupPage() {
           <span className="text-codey-green">C</span>ODEY
         </Link>
 
-        {/* Plan banner */}
-        {plan && planLabels[plan] && (
-          <div className="mb-4 rounded-lg border border-codey-green/30 bg-codey-green-glow px-4 py-3 text-center text-sm text-codey-green">
-            You selected the <strong>{planLabels[plan]}</strong> plan. Create
-            your account to continue.
-          </div>
-        )}
-
         <div className="rounded-xl border border-codey-border bg-codey-card p-8">
           <h1 className="mb-1 text-xl font-semibold text-codey-text">
-            Create your account
+            Set new password
           </h1>
           <p className="mb-6 text-sm text-codey-text-dim">
-            Start using Codey in under a minute
+            Enter your new password below.
           </p>
 
           {error && (
@@ -85,47 +73,10 @@ export default function SignupPage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label
-                htmlFor="name"
-                className="mb-1.5 block text-sm font-medium text-codey-text-dim"
-              >
-                Name
-              </label>
-              <input
-                id="name"
-                type="text"
-                autoComplete="name"
-                placeholder="Ada Lovelace"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="input"
-              />
-            </div>
-
-            <div>
-              <label
-                htmlFor="email"
-                className="mb-1.5 block text-sm font-medium text-codey-text-dim"
-              >
-                Email
-              </label>
-              <input
-                id="email"
-                type="email"
-                required
-                autoComplete="email"
-                placeholder="you@company.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="input"
-              />
-            </div>
-
-            <div>
-              <label
                 htmlFor="password"
                 className="mb-1.5 block text-sm font-medium text-codey-text-dim"
               >
-                Password
+                New password
               </label>
               <input
                 id="password"
@@ -139,6 +90,25 @@ export default function SignupPage() {
               />
             </div>
 
+            <div>
+              <label
+                htmlFor="confirm"
+                className="mb-1.5 block text-sm font-medium text-codey-text-dim"
+              >
+                Confirm password
+              </label>
+              <input
+                id="confirm"
+                type="password"
+                required
+                autoComplete="new-password"
+                placeholder="Re-enter password"
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+                className="input"
+              />
+            </div>
+
             <button
               type="submit"
               disabled={loading}
@@ -147,23 +117,21 @@ export default function SignupPage() {
               {loading ? (
                 <span className="flex items-center justify-center gap-2">
                   <span className="h-4 w-4 animate-spin rounded-full border-2 border-codey-bg border-t-transparent" />
-                  Creating account...
+                  Resetting...
                 </span>
               ) : (
-                "Create account"
+                "Reset password"
               )}
             </button>
           </form>
-
         </div>
 
         <p className="mt-6 text-center text-sm text-codey-text-dim">
-          Already have an account?{" "}
           <Link
             href="/auth/login"
             className="font-medium text-codey-green hover:underline"
           >
-            Log in
+            Back to login
           </Link>
         </p>
       </div>

@@ -59,7 +59,7 @@
             <label for="password">Password</label>
             <input type="password" id="password" placeholder="Your password" required>
         </div>
-        <div class="forgot"><a href="#">Forgot password?</a></div>
+        <div class="forgot"><a href="forgot-password.html">Forgot password?</a></div>
         <div class="error-msg" id="login-error">Invalid email or password.</div>
         <button type="submit" class="submit-btn" id="submit-btn">Sign in</button>
     </form>
@@ -91,7 +91,7 @@ function handleLogin(e) {
     .then(data => {
         localStorage.setItem('codey_token', data.token);
         localStorage.setItem('codey_user', JSON.stringify(data.user || { email }));
-        window.location.href = 'index.html';
+        window.location.href = 'dashboard.html';
     })
     .catch(err => {
         const errEl = document.getElementById('login-error');

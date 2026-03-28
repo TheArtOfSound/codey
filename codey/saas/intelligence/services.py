@@ -3,11 +3,13 @@
 Covers all categories from the Codey Intelligence Services spec:
 - Search (Tavily, Brave, Exa, Bing, Stack Overflow, Perplexity)
 - Package Intelligence (PyPI, npm, crates.io, Maven, Packagist)
-- Security (OSV.dev, Snyk, NVD/NIST)
+- Security (OSV.dev, Snyk, NVD/NIST, Semgrep, SonarCloud, Aikido, DeepSource)
 - Code Analysis (GitHub code search, Semgrep)
-- Documentation (DevDocs)
+- Documentation (DevDocs, Libraries.io)
 - LLM Providers (OpenAI-compatible multi-provider routing)
-- Notifications (Discord, Slack webhooks)
+- Monitoring (BetterStack, UptimeRobot)
+- Dev Tooling (Linear, Vercel, Railway)
+- Communication (Discord, Slack, Twilio SMS)
 """
 from __future__ import annotations
 
@@ -76,6 +78,14 @@ PROVIDERS: dict[str, dict[str, str]] = {
     "cerebras": {
         "base": "https://api.cerebras.ai/v1",
         "key": "CEREBRAS_API_KEY",
+    },
+    "huggingface": {
+        "base": "https://api-inference.huggingface.co/v1",
+        "key": "HUGGINGFACE_API_KEY",
+    },
+    "cohere": {
+        "base": "https://api.cohere.ai/v1",
+        "key": "COHERE_API_KEY",
     },
 }
 
@@ -709,6 +719,309 @@ class IntelligenceServices:
                 "LLM completion failed for %s/%s", provider, model, exc_info=True
             )
         return None
+
+    # ------------------------------------------------------------------
+    # NOTIFICATIONS
+    # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # CODE SECURITY — Additional Scanners
+    # ------------------------------------------------------------------
+
+    async def check_sonarcloud(
+        self, project_key: str, *, metric_keys: str = "bugs,vulnerabilities,code_smells"
+    ) -> dict | None:
+        """Fetch code quality metrics from SonarCloud (free for public repos)."""
+        token = os.getenv("SONARCLOUD_TOKEN")
+        if not token:
+            return None
+        try:
+            resp = await self._http.get(
+                "https://sonarcloud.io/api/measures/component",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"component": project_key, "metricKeys": metric_keys},
+            )
+            if resp.status_code == 200:
+                measures = resp.json().get("component", {}).get("measures", [])
+                return {m["metric"]: m["value"] for m in measures}
+        except Exception:
+            logger.debug("SonarCloud check failed for %r", project_key, exc_info=True)
+        return None
+
+    async def check_aikido(self, repo_url: str) -> list[dict] | None:
+        """Fetch security findings from Aikido Security (free tier)."""
+        key = os.getenv("AIKIDO_API_KEY")
+        if not key:
+            return None
+        try:
+            resp = await self._http.get(
+                "https://app.aikido.dev/api/v1/issues",
+                headers={"Authorization": f"Bearer {key}"},
+                params={"repo": repo_url, "status": "open"},
+            )
+            if resp.status_code == 200:
+                return resp.json().get("issues", [])
+        except Exception:
+            logger.debug("Aikido check failed for %r", repo_url, exc_info=True)
+        return None
+
+    async def check_deepsource(self, repo: str) -> dict | None:
+        """Fetch code analysis from DeepSource (free for public repos)."""
+        token = os.getenv("DEEPSOURCE_TOKEN")
+        if not token:
+            return None
+        try:
+            resp = await self._http.post(
+                "https://api.deepsource.io/graphql",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "query": """
+                        query($repo: String!) {
+                            repository(login: $repo) {
+                                activeIssueCount
+                                resolvedIssueCount
+                                issues(first: 10) {
+                                    edges {
+                                        node { title category shortcode }
+                                    }
+                                }
+                            }
+                        }
+                    """,
+                    "variables": {"repo": repo},
+                },
+            )
+            if resp.status_code == 200:
+                return resp.json().get("data", {}).get("repository")
+        except Exception:
+            logger.debug("DeepSource check failed for %r", repo, exc_info=True)
+        return None
+
+    # ------------------------------------------------------------------
+    # MONITORING
+    # ------------------------------------------------------------------
+
+    async def betterstack_create_monitor(
+        self, url: str, *, name: str = "Codey Monitor"
+    ) -> dict | None:
+        """Create an uptime monitor via BetterStack (3 monitors free)."""
+        key = os.getenv("BETTERSTACK_API_KEY")
+        if not key:
+            return None
+        try:
+            resp = await self._http.post(
+                "https://uptime.betterstack.com/api/v2/monitors",
+                headers={"Authorization": f"Bearer {key}"},
+                json={
+                    "monitor_type": "status",
+                    "url": url,
+                    "pronounceable_name": name,
+                    "check_frequency": 60,
+                },
+            )
+            if resp.status_code in (200, 201):
+                return resp.json().get("data", {}).get("attributes")
+        except Exception:
+            logger.debug("BetterStack monitor creation failed", exc_info=True)
+        return None
+
+    async def betterstack_get_monitors(self) -> list[dict]:
+        """List all BetterStack uptime monitors."""
+        key = os.getenv("BETTERSTACK_API_KEY")
+        if not key:
+            return []
+        try:
+            resp = await self._http.get(
+                "https://uptime.betterstack.com/api/v2/monitors",
+                headers={"Authorization": f"Bearer {key}"},
+            )
+            if resp.status_code == 200:
+                return [
+                    {
+                        "id": m["id"],
+                        "url": m["attributes"]["url"],
+                        "status": m["attributes"]["status"],
+                        "last_checked": m["attributes"].get("last_checked_at"),
+                    }
+                    for m in resp.json().get("data", [])
+                ]
+        except Exception:
+            logger.debug("BetterStack monitor list failed", exc_info=True)
+        return []
+
+    async def uptimerobot_get_monitors(self) -> list[dict]:
+        """List all UptimeRobot monitors (50 free)."""
+        key = os.getenv("UPTIMEROBOT_API_KEY")
+        if not key:
+            return []
+        try:
+            resp = await self._http.post(
+                "https://api.uptimerobot.com/v2/getMonitors",
+                json={"api_key": key, "format": "json"},
+            )
+            if resp.status_code == 200:
+                return [
+                    {
+                        "id": m["id"],
+                        "name": m["friendly_name"],
+                        "url": m["url"],
+                        "status": m["status"],
+                    }
+                    for m in resp.json().get("monitors", [])
+                ]
+        except Exception:
+            logger.debug("UptimeRobot list failed", exc_info=True)
+        return []
+
+    async def uptimerobot_create_monitor(
+        self, url: str, *, name: str = "Codey Monitor"
+    ) -> dict | None:
+        """Create an UptimeRobot HTTP monitor."""
+        key = os.getenv("UPTIMEROBOT_API_KEY")
+        if not key:
+            return None
+        try:
+            resp = await self._http.post(
+                "https://api.uptimerobot.com/v2/newMonitor",
+                json={
+                    "api_key": key,
+                    "format": "json",
+                    "type": 1,  # HTTP(s)
+                    "url": url,
+                    "friendly_name": name,
+                },
+            )
+            if resp.status_code == 200 and resp.json().get("stat") == "ok":
+                return resp.json().get("monitor", {})
+        except Exception:
+            logger.debug("UptimeRobot create failed", exc_info=True)
+        return None
+
+    # ------------------------------------------------------------------
+    # DEV TOOLING
+    # ------------------------------------------------------------------
+
+    async def linear_get_issues(
+        self, *, team_key: str | None = None, limit: int = 10
+    ) -> list[dict]:
+        """Fetch issues from Linear (free tier)."""
+        key = os.getenv("LINEAR_API_KEY")
+        if not key:
+            return []
+        try:
+            query = """
+                query($limit: Int!) {
+                    issues(first: $limit, orderBy: updatedAt) {
+                        nodes {
+                            id identifier title state { name } priority
+                            assignee { name } updatedAt
+                        }
+                    }
+                }
+            """
+            resp = await self._http.post(
+                "https://api.linear.app/graphql",
+                headers={"Authorization": key, "Content-Type": "application/json"},
+                json={"query": query, "variables": {"limit": limit}},
+            )
+            if resp.status_code == 200:
+                nodes = resp.json().get("data", {}).get("issues", {}).get("nodes", [])
+                return [
+                    {
+                        "id": n["identifier"],
+                        "title": n["title"],
+                        "state": n.get("state", {}).get("name"),
+                        "priority": n.get("priority"),
+                        "assignee": (n.get("assignee") or {}).get("name"),
+                    }
+                    for n in nodes
+                ]
+        except Exception:
+            logger.debug("Linear issues fetch failed", exc_info=True)
+        return []
+
+    async def vercel_get_deployments(self, *, limit: int = 5) -> list[dict]:
+        """Fetch recent deployments from Vercel."""
+        token = os.getenv("VERCEL_TOKEN")
+        if not token:
+            return []
+        try:
+            resp = await self._http.get(
+                "https://api.vercel.com/v6/deployments",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"limit": limit},
+            )
+            if resp.status_code == 200:
+                return [
+                    {
+                        "id": d["uid"],
+                        "name": d.get("name"),
+                        "state": d.get("state"),
+                        "url": d.get("url"),
+                        "created": d.get("created"),
+                    }
+                    for d in resp.json().get("deployments", [])
+                ]
+        except Exception:
+            logger.debug("Vercel deployments fetch failed", exc_info=True)
+        return []
+
+    async def railway_get_services(self, project_id: str) -> list[dict]:
+        """Fetch services from a Railway project."""
+        token = os.getenv("RAILWAY_TOKEN")
+        if not token:
+            return []
+        try:
+            resp = await self._http.post(
+                "https://backboard.railway.app/graphql/v2",
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json={
+                    "query": """
+                        query($projectId: String!) {
+                            project(id: $projectId) {
+                                services { edges { node {
+                                    id name
+                                }}}
+                            }
+                        }
+                    """,
+                    "variables": {"projectId": project_id},
+                },
+            )
+            if resp.status_code == 200:
+                edges = (
+                    resp.json()
+                    .get("data", {})
+                    .get("project", {})
+                    .get("services", {})
+                    .get("edges", [])
+                )
+                return [{"id": e["node"]["id"], "name": e["node"]["name"]} for e in edges]
+        except Exception:
+            logger.debug("Railway services fetch failed", exc_info=True)
+        return []
+
+    # ------------------------------------------------------------------
+    # COMMUNICATION — SMS
+    # ------------------------------------------------------------------
+
+    async def send_sms_twilio(self, to: str, body: str) -> bool:
+        """Send SMS via Twilio (free trial credits)."""
+        sid = os.getenv("TWILIO_ACCOUNT_SID")
+        token = os.getenv("TWILIO_AUTH_TOKEN")
+        from_number = os.getenv("TWILIO_FROM_NUMBER")
+        if not (sid and token and from_number):
+            return False
+        try:
+            resp = await self._http.post(
+                f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json",
+                auth=(sid, token),
+                data={"To": to, "From": from_number, "Body": body},
+            )
+            return resp.status_code == 201
+        except Exception:
+            logger.debug("Twilio SMS failed", exc_info=True)
+        return False
 
     # ------------------------------------------------------------------
     # NOTIFICATIONS

@@ -5,9 +5,13 @@ const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 export interface User {
   id: string;
   email: string;
-  github_username: string | null;
-  plan: "free" | "pro" | "team";
+  name: string | null;
+  avatar_url: string | null;
+  plan: string;
+  plan_status: string;
   credits_remaining: number;
+  topup_credits: number;
+  total_credits: number;
   created_at: string;
 }
 
@@ -163,10 +167,10 @@ class ApiClient {
 
   // ── Auth ──────────────────────────────────────────────────────────────
 
-  async signup(email: string, password: string): Promise<{ token: string; user: User }> {
+  async signup(email: string, password: string, name?: string): Promise<{ token: string; user: User }> {
     const data = await this.request<{ token: string; user: User }>("/auth/signup", {
       method: "POST",
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, name: name || undefined }),
     });
     this.setToken(data.token);
     return data;
@@ -182,12 +186,33 @@ class ApiClient {
   }
 
   async loginWithGitHub(code: string): Promise<{ token: string; user: User }> {
-    const data = await this.request<{ token: string; user: User }>("/auth/github/callback", {
-      method: "POST",
-      body: JSON.stringify({ code }),
-    });
+    const data = await this.request<{ token: string; user: User }>(
+      `/auth/github/callback?code=${encodeURIComponent(code)}`
+    );
     this.setToken(data.token);
     return data;
+  }
+
+  async loginWithGoogle(code: string): Promise<{ token: string; user: User }> {
+    const data = await this.request<{ token: string; user: User }>(
+      `/auth/google/callback?code=${encodeURIComponent(code)}`
+    );
+    this.setToken(data.token);
+    return data;
+  }
+
+  async requestPasswordReset(email: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>("/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
+  }
+
+  async confirmPasswordReset(token: string, password: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>("/auth/reset-password/confirm", {
+      method: "POST",
+      body: JSON.stringify({ token, password }),
+    });
   }
 
   logout() {
@@ -203,7 +228,7 @@ class ApiClient {
     return this.request<User>("/users/me");
   }
 
-  async updateProfile(data: { email?: string; github_username?: string }): Promise<User> {
+  async updateProfile(data: { email?: string; name?: string }): Promise<User> {
     return this.request<User>("/users/me", {
       method: "PATCH",
       body: JSON.stringify(data),

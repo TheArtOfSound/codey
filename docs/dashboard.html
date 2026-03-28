@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard — Codey</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-deep: #050a12; --bg-surface: #0a1628; --bg-raised: #111f38;
+            --border: #1e3a5f; --blue-primary: #2563eb; --blue-light: #60a5fa;
+            --text-primary: #f1f5f9; --text-secondary: #94a3b8; --text-muted: #475569;
+            --green: #22c55e; --yellow: #eab308; --red: #ef4444;
+        }
+        body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg-deep); color: var(--text-primary); min-height: 100vh; }
+        body::before { content: ''; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background-image: radial-gradient(circle, rgba(30,58,95,0.3) 1px, transparent 1px); background-size: 32px 32px; pointer-events: none; z-index: 0; opacity: 0.4; }
+
+        /* Nav */
+        .dash-nav { position: sticky; top: 0; z-index: 100; background: var(--bg-deep); border-bottom: 1px solid var(--border); padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; }
+        .dash-nav-left { display: flex; align-items: center; gap: 24px; }
+        .logo { font-size: 20px; font-weight: 700; color: var(--text-primary); text-decoration: none; }
+        .logo-bracket { color: var(--blue-light); }
+        .nav-tabs { display: flex; gap: 4px; }
+        .nav-tab { padding: 6px 14px; border-radius: 6px; font-size: 13px; font-weight: 500; color: var(--text-secondary); text-decoration: none; transition: all 150ms; cursor: pointer; border: none; background: none; font-family: inherit; }
+        .nav-tab:hover { color: var(--text-primary); background: var(--bg-raised); }
+        .nav-tab.active { color: var(--text-primary); background: var(--bg-raised); }
+        .dash-nav-right { display: flex; align-items: center; gap: 16px; }
+        .credits-badge { display: flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 20px; background: var(--bg-raised); border: 1px solid var(--border); font-size: 13px; color: var(--text-secondary); }
+        .credits-badge .count { color: var(--green); font-weight: 600; }
+        .user-menu { display: flex; align-items: center; gap: 8px; padding: 4px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-primary); font-size: 13px; cursor: pointer; font-family: inherit; transition: border-color 150ms; }
+        .user-menu:hover { border-color: var(--blue-primary); }
+        .user-avatar { width: 24px; height: 24px; border-radius: 50%; background: var(--blue-primary); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: white; }
+
+        /* Main content */
+        .dash-main { position: relative; z-index: 1; max-width: 1200px; margin: 0 auto; padding: 32px 24px; }
+
+        /* Stats row */
+        .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 32px; }
+        .stat-card { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px; }
+        .stat-label { font-size: 12px; font-weight: 500; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+        .stat-value { font-size: 28px; font-weight: 700; }
+        .stat-sub { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+        .stat-green { color: var(--green); }
+        .stat-blue { color: var(--blue-light); }
+        .stat-yellow { color: var(--yellow); }
+
+        /* Prompt area */
+        .prompt-section { margin-bottom: 32px; }
+        .prompt-section h2 { font-size: 16px; font-weight: 600; margin-bottom: 12px; }
+        .prompt-box { display: flex; gap: 12px; }
+        .prompt-input { flex: 1; padding: 14px 16px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-primary); font-size: 14px; font-family: inherit; outline: none; transition: border-color 150ms, box-shadow 150ms; }
+        .prompt-input::placeholder { color: var(--text-muted); }
+        .prompt-input:focus { border-color: var(--blue-primary); box-shadow: 0 0 0 2px rgba(37,99,235,0.2); }
+        .prompt-send { padding: 14px 24px; border-radius: 8px; border: none; background: var(--blue-primary); color: white; font-size: 14px; font-weight: 600; font-family: inherit; cursor: pointer; transition: filter 150ms; white-space: nowrap; }
+        .prompt-send:hover { filter: brightness(1.15); }
+        .prompt-send:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* Sessions / Activity */
+        .grid-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+        .panel { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+        .panel-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+        .panel-header h3 { font-size: 14px; font-weight: 600; }
+        .panel-header .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: var(--bg-raised); color: var(--text-muted); }
+        .panel-body { padding: 16px 20px; }
+        .session-item { padding: 12px 0; border-bottom: 1px solid rgba(30,58,95,0.5); }
+        .session-item:last-child { border-bottom: none; }
+        .session-prompt { font-size: 13px; color: var(--text-primary); margin-bottom: 4px; }
+        .session-meta { display: flex; gap: 12px; font-size: 11px; color: var(--text-muted); }
+        .session-status { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 4px; }
+        .status-completed { background: var(--green); }
+        .status-running { background: var(--blue-light); animation: pulse 1.5s infinite; }
+        .status-failed { background: var(--red); }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+        .empty-state { text-align: center; padding: 40px 20px; color: var(--text-muted); }
+        .empty-state .icon { font-size: 32px; margin-bottom: 12px; opacity: 0.5; }
+        .empty-state p { font-size: 13px; }
+
+        /* Quick actions */
+        .quick-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+        .quick-action { padding: 16px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-surface); text-align: center; cursor: pointer; transition: all 150ms; text-decoration: none; color: var(--text-primary); }
+        .quick-action:hover { border-color: var(--blue-primary); background: var(--bg-raised); }
+        .quick-action .qa-icon { font-size: 20px; margin-bottom: 8px; }
+        .quick-action .qa-title { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+        .quick-action .qa-desc { font-size: 11px; color: var(--text-muted); }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .stats-row { grid-template-columns: repeat(2, 1fr); }
+            .grid-2col { grid-template-columns: 1fr; }
+            .quick-actions { grid-template-columns: 1fr; }
+            .nav-tabs { display: none; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- Nav -->
+<div class="dash-nav">
+    <div class="dash-nav-left">
+        <a href="index.html" class="logo"><span class="logo-bracket">[</span>ODEY</a>
+        <div class="nav-tabs">
+            <button class="nav-tab active">Dashboard</button>
+            <button class="nav-tab" onclick="showTab('sessions')">Sessions</button>
+            <button class="nav-tab" onclick="showTab('build')">Build</button>
+        </div>
+    </div>
+    <div class="dash-nav-right">
+        <div class="credits-badge">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+            <span class="count" id="credits-count">10</span> credits
+        </div>
+        <button class="user-menu" id="user-menu-btn">
+            <div class="user-avatar" id="user-avatar">?</div>
+            <span id="user-name">User</span>
+        </button>
+    </div>
+</div>
+
+<!-- Main -->
+<div class="dash-main">
+
+    <!-- Stats -->
+    <div class="stats-row">
+        <div class="stat-card">
+            <div class="stat-label">Credits Remaining</div>
+            <div class="stat-value stat-green" id="stat-credits">10</div>
+            <div class="stat-sub">Free plan</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Sessions</div>
+            <div class="stat-value stat-blue">0</div>
+            <div class="stat-sub">All time</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Lines Generated</div>
+            <div class="stat-value stat-blue">0</div>
+            <div class="stat-sub">Across all projects</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Plan</div>
+            <div class="stat-value" id="stat-plan" style="font-size: 20px;">Free</div>
+            <div class="stat-sub"><a href="index.html#pricing" style="color: var(--blue-light); text-decoration: none;">Upgrade</a></div>
+        </div>
+    </div>
+
+    <!-- Prompt -->
+    <div class="prompt-section">
+        <h2>What do you want to build?</h2>
+        <div class="prompt-box">
+            <input type="text" class="prompt-input" id="prompt-input" placeholder="Build a FastAPI endpoint for user authentication with JWT..." autofocus>
+            <button class="prompt-send" id="prompt-send" onclick="handlePrompt()">Generate</button>
+        </div>
+    </div>
+
+    <!-- Two-column: Sessions + Quick Actions -->
+    <div class="grid-2col">
+        <div class="panel">
+            <div class="panel-header">
+                <h3>Recent Sessions</h3>
+                <span class="badge" id="session-count">0</span>
+            </div>
+            <div class="panel-body" id="sessions-list">
+                <div class="empty-state">
+                    <div class="icon">&#9889;</div>
+                    <p>No sessions yet. Enter a prompt above to start your first one.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-header">
+                <h3>Quick Actions</h3>
+            </div>
+            <div class="panel-body">
+                <div class="quick-actions">
+                    <div class="quick-action" onclick="setPrompt('Analyze my codebase and find structural issues')">
+                        <div class="qa-icon">&#128269;</div>
+                        <div class="qa-title">Analyze</div>
+                        <div class="qa-desc">Scan for structural issues</div>
+                    </div>
+                    <div class="quick-action" onclick="setPrompt('Build a complete REST API with authentication')">
+                        <div class="qa-icon">&#9889;</div>
+                        <div class="qa-title">Build</div>
+                        <div class="qa-desc">Generate a full project</div>
+                    </div>
+                    <div class="quick-action" onclick="setPrompt('Review this code for security vulnerabilities')">
+                        <div class="qa-icon">&#128274;</div>
+                        <div class="qa-title">Security</div>
+                        <div class="qa-desc">Audit for vulnerabilities</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const API = 'https://codey-jc2r.onrender.com';
+
+// Auth check
+const token = localStorage.getItem('codey_token');
+const userStr = localStorage.getItem('codey_user');
+
+if (!token) {
+    window.location.href = 'login.html';
+} else {
+    // Populate user info
+    try {
+        const user = JSON.parse(userStr);
+        if (user) {
+            const name = user.name || user.email || 'User';
+            document.getElementById('user-name').textContent = name.split(' ')[0];
+            document.getElementById('user-avatar').textContent = (name[0] || '?').toUpperCase();
+            document.getElementById('stat-credits').textContent = user.credits_remaining ?? user.credits ?? 10;
+            document.getElementById('credits-count').textContent = user.credits_remaining ?? user.credits ?? 10;
+            const plan = (user.plan || 'free').charAt(0).toUpperCase() + (user.plan || 'free').slice(1);
+            document.getElementById('stat-plan').textContent = plan;
+        }
+    } catch (e) {}
+
+    // Fetch fresh user data
+    fetch(API + '/users/me', {
+        headers: { 'Authorization': 'Bearer ' + token }
+    })
+    .then(r => { if (!r.ok) throw new Error('Auth failed'); return r.json(); })
+    .then(user => {
+        localStorage.setItem('codey_user', JSON.stringify(user));
+        const name = user.name || user.email || 'User';
+        document.getElementById('user-name').textContent = name.split(' ')[0];
+        document.getElementById('user-avatar').textContent = (name[0] || '?').toUpperCase();
+        document.getElementById('stat-credits').textContent = user.credits_remaining ?? 10;
+        document.getElementById('credits-count').textContent = user.credits_remaining ?? 10;
+        const plan = (user.plan || 'free').charAt(0).toUpperCase() + (user.plan || 'free').slice(1);
+        document.getElementById('stat-plan').textContent = plan;
+    })
+    .catch(() => {
+        // Token expired
+        localStorage.removeItem('codey_token');
+        localStorage.removeItem('codey_user');
+        window.location.href = 'login.html';
+    });
+}
+
+// Prompt handling
+function setPrompt(text) {
+    document.getElementById('prompt-input').value = text;
+    document.getElementById('prompt-input').focus();
+}
+
+function handlePrompt() {
+    const input = document.getElementById('prompt-input');
+    const btn = document.getElementById('prompt-send');
+    const prompt = input.value.trim();
+    if (!prompt) return;
+
+    btn.disabled = true;
+    btn.textContent = 'Generating...';
+
+    fetch(API + '/sessions', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token
+        },
+        body: JSON.stringify({ prompt, mode: 'generate' })
+    })
+    .then(r => {
+        if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Session failed'); });
+        return r.json();
+    })
+    .then(session => {
+        // Add to sessions list
+        const list = document.getElementById('sessions-list');
+        const empty = list.querySelector('.empty-state');
+        if (empty) empty.remove();
+
+        const item = document.createElement('div');
+        item.className = 'session-item';
+        item.innerHTML = `
+            <div class="session-prompt">${prompt}</div>
+            <div class="session-meta">
+                <span><span class="session-status status-running"></span> Running</span>
+                <span>Just now</span>
+            </div>
+        `;
+        list.prepend(item);
+
+        const count = document.getElementById('session-count');
+        count.textContent = parseInt(count.textContent) + 1;
+
+        input.value = '';
+        btn.disabled = false;
+        btn.textContent = 'Generate';
+    })
+    .catch(err => {
+        alert(err.message || 'Failed to create session. Check your credits.');
+        btn.disabled = false;
+        btn.textContent = 'Generate';
+    });
+}
+
+// Enter key to submit
+document.getElementById('prompt-input').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') handlePrompt();
+});
+
+// User menu (simple logout)
+document.getElementById('user-menu-btn').addEventListener('click', function() {
+    if (confirm('Sign out?')) {
+        localStorage.removeItem('codey_token');
+        localStorage.removeItem('codey_user');
+        window.location.href = 'index.html';
+    }
+});
+
+function showTab(tab) {
+    // For now just scroll or refocus
+    if (tab === 'sessions') {
+        document.getElementById('sessions-list').scrollIntoView({ behavior: 'smooth' });
+    }
+}
+</script>
+
+</body>
+</html>
