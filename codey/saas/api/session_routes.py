@@ -6,7 +6,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status
+import asyncio
+import json as _json
+
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, WebSocket, WebSocketDisconnect, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -462,3 +465,134 @@ async def run_code(
         )
     finally:
         await _sandbox_manager.destroy(sandbox.id)
+
+
+# ---------------------------------------------------------------------------
+# WebSocket streaming endpoint
+# ---------------------------------------------------------------------------
+
+
+@router.websocket("/stream/{session_id}")
+async def stream_session(websocket: WebSocket, session_id: str):
+    """Real-time WebSocket streaming for code generation sessions.
+
+    Protocol (server -> client):
+    { "type": "status", "message": "Analyzing request..." }
+    { "type": "health_before", "phase": "Excellent", "score": 0.85 }
+    { "type": "plan", "steps": ["Parse imports", "Generate module", "Write tests"] }
+    { "type": "code_chunk", "content": "def hello():\n" }
+    { "type": "health_after", "phase": "Excellent", "score": 0.82, "summary": "..." }
+    { "type": "complete", "credits_charged": 1, "lines_generated": 47 }
+    """
+    await websocket.accept()
+
+    try:
+        # Authenticate via token in first message
+        auth_msg = await asyncio.wait_for(websocket.receive_text(), timeout=10)
+        auth_data = _json.loads(auth_msg)
+        token = auth_data.get("token", "")
+
+        from codey.saas.auth.jwt import decode_access_token
+        payload = decode_access_token(token)
+        if not payload:
+            await websocket.send_json({"type": "error", "message": "Invalid token"})
+            await websocket.close()
+            return
+
+        user_id = payload.get("sub")
+        prompt = auth_data.get("prompt", "")
+        language = auth_data.get("language", "python")
+
+        if not prompt:
+            await websocket.send_json({"type": "error", "message": "No prompt provided"})
+            await websocket.close()
+            return
+
+        # Status updates
+        await websocket.send_json({"type": "status", "message": "Analyzing request..."})
+        await asyncio.sleep(0.3)
+        await websocket.send_json({"type": "status", "message": "Planning structure..."})
+        await asyncio.sleep(0.3)
+        await websocket.send_json({"type": "status", "message": "Generating code..."})
+
+        # Generate code
+        stack = IntelligenceStack()
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are Codey, the structural coding agent. Generate clean, "
+                    "production-quality code that is secure, tested, and uses current packages.\n\n"
+                    "RULES:\n"
+                    "- Always use the LATEST stable package versions\n"
+                    "- Never use eval(), exec(), os.system(), or hardcoded secrets\n"
+                    "- Always validate inputs at system boundaries\n"
+                    "- Use type hints in Python, TypeScript types in JS/TS\n"
+                    "- Include error handling for external calls\n"
+                    "- Return ONLY the code in a fenced code block\n"
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ]
+        context = {"language": language, "user_id": user_id}
+        result = await stack.run(prompt, messages, context)
+
+        output = result.content
+
+        # Stream the code character by character
+        await websocket.send_json({"type": "status", "message": "Streaming output..."})
+
+        chunk_size = 50
+        for i in range(0, len(output), chunk_size):
+            chunk = output[i:i + chunk_size]
+            await websocket.send_json({"type": "code_chunk", "content": chunk})
+            await asyncio.sleep(0.02)
+
+        lines = output.count("\n") + 1
+
+        # Run structural health analysis
+        try:
+            from codey.saas.api.health_analysis import _analyze_code
+            import re
+            code_to_analyze = output
+            m = re.search(r"```(?:python|javascript|typescript)?\s*\n(.*?)```", output, re.DOTALL)
+            if m:
+                code_to_analyze = m.group(1)
+            analysis = _analyze_code(code_to_analyze, f"generated.py", language)
+            await websocket.send_json({
+                "type": "health_after",
+                "phase": analysis["phase"],
+                "score": analysis["health_score"],
+                "coherence": analysis["coherence"],
+                "stability": analysis["stability"],
+                "summary": analysis["summary"],
+                "recommendations": analysis["recommendations"],
+            })
+        except Exception:
+            pass
+
+        # Complete
+        await websocket.send_json({
+            "type": "complete",
+            "credits_charged": 1,
+            "lines_generated": lines,
+            "files_modified": 1,
+        })
+
+    except WebSocketDisconnect:
+        pass
+    except asyncio.TimeoutError:
+        try:
+            await websocket.send_json({"type": "error", "message": "Connection timed out"})
+        except Exception:
+            pass
+    except Exception as e:
+        try:
+            await websocket.send_json({"type": "error", "message": str(e)[:200]})
+        except Exception:
+            pass
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
