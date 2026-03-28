@@ -200,6 +200,20 @@ async def create_prompt_session(
         session.completed_at = datetime.utcnow()
         await db.flush()
 
+        # Store session context as a memory for future retrieval
+        try:
+            from codey.saas.intelligence.embeddings import embedding_service
+            memory_content = f"User asked: {body.prompt[:200]}. Generated {lines} lines of {body.language or 'python'} code."
+            await embedding_service.store_memory(
+                db,
+                user_id=str(current_user.id),
+                content=memory_content,
+                memory_type="session_context",
+                confidence=0.8,
+            )
+        except Exception:
+            pass  # Memory storage is best-effort
+
         return PromptResponse(
             session_id=str(session.id),
             estimated_credits=estimated,
