@@ -46,14 +46,19 @@ class AuthService:
         )
         return result.scalar_one_or_none()
 
-    async def _create_stripe_customer(self, email: str, name: str | None) -> str:
-        """Create a Stripe customer and return the customer ID."""
-        customer = stripe.Customer.create(
-            email=email,
-            name=name or "",
-            metadata={"source": "codey_signup"},
-        )
-        return customer["id"]
+    async def _create_stripe_customer(self, email: str, name: str | None) -> str | None:
+        """Create a Stripe customer and return the customer ID. Returns None if Stripe is not configured."""
+        try:
+            customer = stripe.Customer.create(
+                email=email,
+                name=name or "",
+                metadata={"source": "codey_signup"},
+            )
+            return customer["id"]
+        except Exception as e:
+            import logging
+            logging.getLogger("codey").warning(f"Stripe customer creation skipped: {e}")
+            return None
 
     # ------------------------------------------------------------------
     # Email/password auth
