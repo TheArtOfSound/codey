@@ -250,6 +250,35 @@ if (!token) {
     });
 }
 
+// Load session history from backend
+fetch(API + '/users/me/sessions?limit=10', {
+    headers: { 'Authorization': 'Bearer ' + token }
+})
+.then(r => { if (!r.ok) throw new Error(); return r.json(); })
+.then(sessions => {
+    const list = document.getElementById('sessions-list');
+    const items = sessions.sessions || sessions || [];
+    if (items.length > 0) {
+        const empty = list.querySelector('.empty-state');
+        if (empty) empty.remove();
+        document.getElementById('session-count').textContent = items.length;
+        items.forEach(s => {
+            const item = document.createElement('div');
+            item.className = 'session-item';
+            const status = s.status === 'completed' ? 'status-completed' : s.status === 'failed' ? 'status-failed' : 'status-running';
+            const ago = new Date(s.started_at || s.created_at);
+            const timeStr = ago.toLocaleDateString() + ' ' + ago.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+            item.innerHTML = '<div class="session-prompt">' + (s.prompt || s.mode || 'Session').substring(0, 80) + '</div>' +
+                '<div class="session-meta"><span><span class="session-status ' + status + '"></span> ' + (s.status || 'unknown') +
+                (s.lines_generated ? ' &middot; ' + s.lines_generated + ' lines' : '') + '</span>' +
+                '<span>' + (s.credits_charged || 0) + ' credits</span>' +
+                '<span>' + timeStr + '</span></div>';
+            list.appendChild(item);
+        });
+    }
+})
+.catch(() => {});
+
 // Check for try_prompt from examples page
 const savedPrompt = localStorage.getItem('codey_try_prompt');
 if (savedPrompt) {

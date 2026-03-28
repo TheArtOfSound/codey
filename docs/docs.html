@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Documentation — Codey</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+        :root { --bg-deep: #050a12; --bg-surface: #0a1628; --border: #1e3a5f; --blue-primary: #2563eb; --blue-light: #60a5fa; --text-primary: #f1f5f9; --text-secondary: #94a3b8; --text-muted: #475569; --green: #22c55e; --yellow: #eab308; --red: #ef4444; }
+        body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg-deep); color: var(--text-primary); display: flex; min-height: 100vh; }
+        .sidebar { width: 240px; background: var(--bg-surface); border-right: 1px solid var(--border); padding: 20px 16px; position: fixed; height: 100vh; overflow-y: auto; }
+        .sidebar a.logo { font-size: 18px; font-weight: 700; color: var(--text-primary); text-decoration: none; display: block; margin-bottom: 24px; }
+        .sidebar a.logo span { color: var(--blue-light); }
+        .nav-section { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin: 16px 0 8px; }
+        .nav-item { display: block; padding: 6px 8px; border-radius: 4px; font-size: 13px; color: var(--text-secondary); text-decoration: none; }
+        .nav-item:hover { background: var(--bg-deep); color: var(--text-primary); }
+        .nav-item .method { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 600; padding: 1px 4px; border-radius: 3px; margin-right: 4px; }
+        .method-get { background: rgba(34,197,94,0.15); color: #22c55e; }
+        .method-post { background: rgba(37,99,235,0.15); color: #60a5fa; }
+        .method-delete { background: rgba(239,68,68,0.15); color: #ef4444; }
+        .method-patch { background: rgba(234,179,8,0.15); color: #eab308; }
+        .main { margin-left: 240px; flex: 1; padding: 32px; max-width: 800px; }
+        h1 { font-size: 28px; margin-bottom: 8px; }
+        .subtitle { color: var(--text-secondary); font-size: 14px; margin-bottom: 32px; }
+        .endpoint { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+        .endpoint-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+        .endpoint-method { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; padding: 3px 8px; border-radius: 4px; }
+        .endpoint-path { font-family: 'JetBrains Mono', monospace; font-size: 14px; color: var(--text-primary); }
+        .endpoint-desc { font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; }
+        .code-block { background: #0d1117; border: 1px solid var(--border); border-radius: 6px; padding: 12px; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #e6edf3; overflow-x: auto; white-space: pre; margin: 8px 0; }
+        .param-table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+        .param-table th, .param-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid rgba(30,58,95,0.3); font-size: 12px; }
+        .param-table th { color: var(--text-muted); font-weight: 600; }
+        .param-name { font-family: 'JetBrains Mono', monospace; color: var(--blue-light); }
+        .param-type { color: var(--text-muted); }
+        .badge { padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; }
+        .badge-required { background: rgba(239,68,68,0.15); color: #ef4444; }
+        .badge-optional { background: rgba(71,85,105,0.2); color: #94a3b8; }
+        .auth-note { font-size: 12px; color: var(--yellow); margin-bottom: 8px; }
+        @media (max-width: 768px) { .sidebar { display: none; } .main { margin-left: 0; } }
+    </style>
+</head>
+<body>
+<div class="sidebar">
+    <a href="index.html" class="logo"><span>[</span>ODEY</a>
+    <div class="nav-section">Authentication</div>
+    <a class="nav-item" href="#signup"><span class="method method-post">POST</span> /auth/signup</a>
+    <a class="nav-item" href="#login"><span class="method method-post">POST</span> /auth/login</a>
+    <div class="nav-section">Code Generation</div>
+    <a class="nav-item" href="#prompt"><span class="method method-post">POST</span> /sessions/prompt</a>
+    <a class="nav-item" href="#run"><span class="method method-post">POST</span> /sessions/run</a>
+    <div class="nav-section">Analysis</div>
+    <a class="nav-item" href="#analyze"><span class="method method-post">POST</span> /analyze/code</a>
+    <div class="nav-section">Build Mode</div>
+    <a class="nav-item" href="#plan"><span class="method method-post">POST</span> /build/plan</a>
+    <a class="nav-item" href="#approve"><span class="method method-post">POST</span> /build/approve</a>
+    <div class="nav-section">Account</div>
+    <a class="nav-item" href="#me"><span class="method method-get">GET</span> /users/me</a>
+    <a class="nav-item" href="#credits"><span class="method method-get">GET</span> /credits/balance</a>
+    <div class="nav-section">Billing</div>
+    <a class="nav-item" href="#plans"><span class="method method-get">GET</span> /billing/plans</a>
+    <a class="nav-item" href="#subscribe"><span class="method method-post">POST</span> /billing/subscribe</a>
+    <div class="nav-section">Links</div>
+    <a class="nav-item" href="dashboard.html">Dashboard</a>
+    <a class="nav-item" href="examples.html">Examples</a>
+</div>
+
+<div class="main">
+    <h1>API Reference</h1>
+    <p class="subtitle">All endpoints require JWT authentication unless noted. Pass token as <code>Authorization: Bearer YOUR_TOKEN</code>.</p>
+
+    <div class="auth-note">Base URL: https://codey-jc2r.onrender.com</div>
+
+    <div class="endpoint" id="signup">
+        <div class="endpoint-header">
+            <span class="endpoint-method method-post" style="background:rgba(37,99,235,0.15);color:#60a5fa;">POST</span>
+            <span class="endpoint-path">/auth/signup</span>
+        </div>
+        <div class="endpoint-desc">Create a new account. Returns JWT token and user object. No auth required.</div>
+        <table class="param-table">
+            <tr><th>Parameter</th><th>Type</th><th></th></tr>
+            <tr><td class="param-name">email</td><td class="param-type">string</td><td><span class="badge badge-required">required</span></td></tr>
+            <tr><td class="param-name">password</td><td class="param-type">string</td><td><span class="badge badge-required">required</span></td></tr>
+            <tr><td class="param-name">name</td><td class="param-type">string</td><td><span class="badge badge-optional">optional</span></td></tr>
+        </table>
+        <div class="code-block">curl -X POST https://codey-jc2r.onrender.com/auth/signup \
+  -H "Content-Type: application/json" \
+  -d '{"email":"you@example.com","password":"pass1234","name":"Your Name"}'</div>
+    </div>
+
+    <div class="endpoint" id="prompt">
+        <div class="endpoint-header">
+            <span class="endpoint-method" style="background:rgba(37,99,235,0.15);color:#60a5fa;">POST</span>
+            <span class="endpoint-path">/sessions/prompt</span>
+        </div>
+        <div class="endpoint-desc">Generate code from a natural language prompt. Returns generated code, credit cost, structural health report.</div>
+        <table class="param-table">
+            <tr><th>Parameter</th><th>Type</th><th></th></tr>
+            <tr><td class="param-name">prompt</td><td class="param-type">string</td><td><span class="badge badge-required">required</span></td></tr>
+            <tr><td class="param-name">language</td><td class="param-type">string</td><td><span class="badge badge-optional">optional</span> (python, javascript, etc)</td></tr>
+        </table>
+        <div class="code-block">curl -X POST https://codey-jc2r.onrender.com/sessions/prompt \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"Write a Python function that checks if a number is prime"}'</div>
+        <div class="code-block">// Response
+{
+  "session_id": "uuid",
+  "estimated_credits": 1,
+  "output": "```python\ndef is_prime(n):\n    ...\n```",
+  "lines_generated": 15,
+  "status": "completed",
+  "security_score": 1.0,
+  "security_issues": [],
+  "health": {
+    "phase": "Excellent",
+    "health_score": 0.85,
+    "summary": "Code is structurally healthy."
+  }
+}</div>
+    </div>
+
+    <div class="endpoint" id="run">
+        <div class="endpoint-header">
+            <span class="endpoint-method" style="background:rgba(37,99,235,0.15);color:#60a5fa;">POST</span>
+            <span class="endpoint-path">/sessions/run</span>
+        </div>
+        <div class="endpoint-desc">Execute code in an isolated sandbox. Returns stdout, stderr, exit code.</div>
+        <table class="param-table">
+            <tr><th>Parameter</th><th>Type</th><th></th></tr>
+            <tr><td class="param-name">code</td><td class="param-type">string</td><td><span class="badge badge-required">required</span></td></tr>
+            <tr><td class="param-name">language</td><td class="param-type">string</td><td><span class="badge badge-optional">optional</span> (default: python)</td></tr>
+        </table>
+    </div>
+
+    <div class="endpoint" id="analyze">
+        <div class="endpoint-header">
+            <span class="endpoint-method" style="background:rgba(37,99,235,0.15);color:#60a5fa;">POST</span>
+            <span class="endpoint-path">/analyze/code</span>
+        </div>
+        <div class="endpoint-desc">Analyze code for structural health. Returns phase, ES score, coupling, cohesion, stress components, recommendations.</div>
+        <table class="param-table">
+            <tr><th>Parameter</th><th>Type</th><th></th></tr>
+            <tr><td class="param-name">code</td><td class="param-type">string</td><td><span class="badge badge-required">required</span></td></tr>
+            <tr><td class="param-name">filename</td><td class="param-type">string</td><td><span class="badge badge-optional">optional</span></td></tr>
+            <tr><td class="param-name">language</td><td class="param-type">string</td><td><span class="badge badge-optional">optional</span></td></tr>
+        </table>
+    </div>
+
+    <div class="endpoint" id="me">
+        <div class="endpoint-header">
+            <span class="endpoint-method" style="background:rgba(34,197,94,0.15);color:#22c55e;">GET</span>
+            <span class="endpoint-path">/users/me</span>
+        </div>
+        <div class="endpoint-desc">Get current user profile, plan, credit balance.</div>
+    </div>
+
+    <div class="endpoint" id="plans">
+        <div class="endpoint-header">
+            <span class="endpoint-method" style="background:rgba(34,197,94,0.15);color:#22c55e;">GET</span>
+            <span class="endpoint-path">/billing/plans</span>
+        </div>
+        <div class="endpoint-desc">List all subscription plans with pricing and features.</div>
+    </div>
+
+    <div class="endpoint" id="subscribe">
+        <div class="endpoint-header">
+            <span class="endpoint-method" style="background:rgba(37,99,235,0.15);color:#60a5fa;">POST</span>
+            <span class="endpoint-path">/billing/subscribe</span>
+        </div>
+        <div class="endpoint-desc">Subscribe to a plan. Returns Stripe Checkout URL for payment.</div>
+        <table class="param-table">
+            <tr><th>Parameter</th><th>Type</th><th></th></tr>
+            <tr><td class="param-name">plan</td><td class="param-type">string</td><td><span class="badge badge-required">required</span> (starter, pro, team)</td></tr>
+        </table>
+    </div>
+</div>
+</body>
+</html>

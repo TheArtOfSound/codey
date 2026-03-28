@@ -246,6 +246,25 @@ function pollBuild(projectId) {
                 statusEl.textContent = `Build complete! ${done} files, ${proj.lines_generated || 0} lines generated.`;
                 output.textContent += `\n> Build complete.\n> ${done} files generated across ${proj.total_phases || 1} phases.\n> ${proj.lines_generated || 0} total lines of code.\n`;
 
+                // Add download button
+                const dlBtn = document.createElement('button');
+                dlBtn.textContent = 'Download as ZIP';
+                dlBtn.style.cssText = 'margin-top:12px;padding:10px 24px;border-radius:6px;border:none;background:#22c55e;color:#050a12;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;';
+                dlBtn.onclick = function() {
+                    fetch(API + '/build/' + projectId + '/download', {
+                        headers: { 'Authorization': 'Bearer ' + token }
+                    })
+                    .then(r => r.json())
+                    .then(d => {
+                        if (d.download_url) {
+                            window.open(API + d.download_url, '_blank');
+                        } else {
+                            alert('Download not available yet');
+                        }
+                    });
+                };
+                document.getElementById('building-section').appendChild(dlBtn);
+
                 // Fetch and display generated files
                 fetch(API + '/build/' + projectId + '/files', {
                     headers: { 'Authorization': 'Bearer ' + token }
