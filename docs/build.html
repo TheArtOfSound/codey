@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Build Mode — Codey</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+        :root { --bg-deep: #050a12; --bg-surface: #0a1628; --bg-raised: #111f38; --border: #1e3a5f; --blue-primary: #2563eb; --blue-light: #60a5fa; --text-primary: #f1f5f9; --text-secondary: #94a3b8; --text-muted: #475569; --green: #22c55e; --yellow: #eab308; --red: #ef4444; }
+        body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg-deep); color: var(--text-primary); min-height: 100vh; }
+        .nav { position: sticky; top: 0; z-index: 100; background: var(--bg-deep); border-bottom: 1px solid var(--border); padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; }
+        .nav a { color: var(--text-primary); text-decoration: none; font-size: 20px; font-weight: 700; }
+        .nav span { color: var(--blue-light); }
+        .nav-right { display: flex; gap: 16px; align-items: center; }
+        .nav-right a { font-size: 13px; color: var(--text-secondary); text-decoration: none; }
+        .nav-right a:hover { color: var(--text-primary); }
+        .main { max-width: 800px; margin: 0 auto; padding: 48px 24px; }
+        h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
+        .subtitle { color: var(--text-secondary); font-size: 15px; margin-bottom: 32px; }
+        .templates { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 32px; }
+        .template { padding: 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-surface); cursor: pointer; transition: all 150ms; text-align: center; }
+        .template:hover { border-color: var(--blue-primary); background: var(--bg-raised); }
+        .template.selected { border-color: var(--blue-primary); background: var(--bg-raised); }
+        .template .icon { font-size: 24px; margin-bottom: 6px; }
+        .template .name { font-size: 13px; font-weight: 600; }
+        .template .desc { font-size: 11px; color: var(--text-muted); }
+        textarea { width: 100%; min-height: 120px; padding: 16px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-primary); font-size: 14px; font-family: inherit; resize: vertical; outline: none; }
+        textarea:focus { border-color: var(--blue-primary); }
+        textarea::placeholder { color: var(--text-muted); }
+        .actions { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; }
+        .estimate { font-size: 13px; color: var(--text-muted); }
+        .btn-build { padding: 12px 32px; border-radius: 8px; border: none; background: var(--blue-primary); color: white; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; }
+        .btn-build:hover { filter: brightness(1.15); }
+        .btn-build:disabled { opacity: 0.5; cursor: not-allowed; }
+        /* Plan display */
+        .plan-section { display: none; margin-top: 32px; }
+        .plan-section.active { display: block; }
+        .plan-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+        .plan-header h2 { font-size: 20px; font-weight: 600; }
+        .phase { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; }
+        .phase-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .phase-name { font-size: 14px; font-weight: 600; }
+        .phase-badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: var(--bg-raised); color: var(--text-muted); }
+        .phase-files { list-style: none; }
+        .phase-files li { font-size: 12px; font-family: 'JetBrains Mono', monospace; color: var(--text-secondary); padding: 2px 0; padding-left: 16px; position: relative; }
+        .phase-files li::before { content: ''; position: absolute; left: 0; top: 8px; width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); }
+        .plan-actions { display: flex; gap: 12px; margin-top: 16px; }
+        .btn-approve { padding: 10px 24px; border-radius: 6px; border: none; background: var(--green); color: #050a12; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; }
+        .btn-cancel { padding: 10px 24px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--text-secondary); font-size: 14px; cursor: pointer; font-family: inherit; }
+        /* Building display */
+        .building-section { display: none; margin-top: 32px; }
+        .building-section.active { display: block; }
+        .progress-bar { width: 100%; height: 4px; background: var(--border); border-radius: 2px; margin: 16px 0; }
+        .progress-fill { height: 100%; background: var(--blue-primary); border-radius: 2px; transition: width 500ms ease; }
+        .build-output { background: #0d1117; border: 1px solid var(--border); border-radius: 8px; padding: 16px; font-family: 'JetBrains Mono', monospace; font-size: 13px; color: #e6edf3; min-height: 300px; max-height: 500px; overflow-y: auto; white-space: pre-wrap; }
+        @media (max-width: 768px) { .templates { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+
+<div class="nav">
+    <a href="dashboard.html"><span>[</span>ODEY</a>
+    <div class="nav-right">
+        <a href="dashboard.html">Dashboard</a>
+        <a href="pricing.html">Pricing</a>
+    </div>
+</div>
+
+<div class="main">
+    <!-- Input Section -->
+    <div id="input-section">
+        <h1>Build a complete project</h1>
+        <p class="subtitle">Describe what you want to build. Codey plans, generates, tests, and delivers a working application.</p>
+
+        <div class="templates" id="templates">
+            <div class="template" onclick="selectTemplate(this, 'Build a SaaS starter with auth, Stripe billing, dashboard, and REST API')">
+                <div class="icon">&#9889;</div>
+                <div class="name">SaaS Starter</div>
+                <div class="desc">Auth + Billing + Dashboard</div>
+            </div>
+            <div class="template" onclick="selectTemplate(this, 'Build a REST API with JWT authentication, PostgreSQL, and full CRUD endpoints')">
+                <div class="icon">&#128640;</div>
+                <div class="name">REST API</div>
+                <div class="desc">FastAPI + PostgreSQL + JWT</div>
+            </div>
+            <div class="template" onclick="selectTemplate(this, 'Build a React app with TypeScript, Tailwind, authentication, and a dashboard')">
+                <div class="icon">&#9881;</div>
+                <div class="name">React App</div>
+                <div class="desc">React + TS + Tailwind</div>
+            </div>
+            <div class="template" onclick="selectTemplate(this, 'Build a CLI tool with argument parsing, config file support, and colored output')">
+                <div class="icon">&#128187;</div>
+                <div class="name">CLI Tool</div>
+                <div class="desc">Python CLI + Config + Logging</div>
+            </div>
+            <div class="template" onclick="selectTemplate(this, 'Build a Discord bot with slash commands, event handlers, and a database')">
+                <div class="icon">&#129302;</div>
+                <div class="name">Discord Bot</div>
+                <div class="desc">discord.py + Slash Commands</div>
+            </div>
+            <div class="template" onclick="selectTemplate(this, 'Build an e-commerce store with product catalog, shopping cart, Stripe checkout, and order management')">
+                <div class="icon">&#128722;</div>
+                <div class="name">E-commerce</div>
+                <div class="desc">Catalog + Cart + Stripe</div>
+            </div>
+        </div>
+
+        <textarea id="build-description" placeholder="Describe your project in detail. The more specific you are, the better the result.&#10;&#10;Example: Build a booking system for a barbershop. Customers can see available time slots, book appointments, and receive confirmation emails. The owner has a dashboard to manage appointments, set availability, and view analytics."></textarea>
+
+        <div class="actions">
+            <span class="estimate" id="build-estimate"></span>
+            <button class="btn-build" id="btn-plan" onclick="createPlan()">Plan project</button>
+        </div>
+    </div>
+
+    <!-- Plan Section -->
+    <div id="plan-section" class="plan-section">
+        <div class="plan-header">
+            <h2>Project Plan</h2>
+            <span class="estimate" id="plan-credits"></span>
+        </div>
+        <div id="plan-phases"></div>
+        <div class="plan-actions">
+            <button class="btn-approve" id="btn-approve" onclick="approvePlan()">Approve and build</button>
+            <button class="btn-cancel" onclick="cancelPlan()">Cancel</button>
+        </div>
+    </div>
+
+    <!-- Building Section -->
+    <div id="building-section" class="building-section">
+        <h2 id="build-phase-name">Building...</h2>
+        <div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width: 0%"></div></div>
+        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;" id="build-status">Starting...</p>
+        <div class="build-output" id="build-output"></div>
+    </div>
+</div>
+
+<script>
+const API = 'https://codey-jc2r.onrender.com';
+const token = localStorage.getItem('codey_token');
+if (!token) window.location.href = 'login.html';
+
+let currentPlan = null;
+
+function selectTemplate(el, desc) {
+    document.querySelectorAll('.template').forEach(t => t.classList.remove('selected'));
+    el.classList.add('selected');
+    document.getElementById('build-description').value = desc;
+    updateBuildEstimate();
+}
+
+function updateBuildEstimate() {
+    const desc = document.getElementById('build-description').value.trim();
+    const el = document.getElementById('build-estimate');
+    if (!desc) { el.textContent = ''; return; }
+    const words = desc.split(/\s+/).length;
+    if (words < 20) el.textContent = 'Est: 15-25 credits';
+    else if (words < 50) el.textContent = 'Est: 25-45 credits';
+    else el.textContent = 'Est: 40-65 credits';
+}
+
+document.getElementById('build-description').addEventListener('input', updateBuildEstimate);
+
+function createPlan() {
+    const desc = document.getElementById('build-description').value.trim();
+    if (!desc) return;
+    const btn = document.getElementById('btn-plan');
+    btn.disabled = true;
+    btn.textContent = 'Planning...';
+
+    fetch(API + '/build/plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify({ description: desc })
+    })
+    .then(r => { if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Planning failed'); }); return r.json(); })
+    .then(plan => {
+        currentPlan = plan;
+        showPlan(plan);
+        btn.disabled = false;
+        btn.textContent = 'Plan project';
+    })
+    .catch(err => {
+        alert(err.message);
+        btn.disabled = false;
+        btn.textContent = 'Plan project';
+    });
+}
+
+function showPlan(plan) {
+    document.getElementById('input-section').style.display = 'none';
+    const section = document.getElementById('plan-section');
+    section.classList.add('active');
+
+    document.getElementById('plan-credits').textContent = 'Est: ' + (plan.estimated_credits || '20-40') + ' credits';
+
+    const container = document.getElementById('plan-phases');
+    container.innerHTML = '';
+    (plan.phases || []).forEach(phase => {
+        const div = document.createElement('div');
+        div.className = 'phase';
+        div.innerHTML = `
+            <div class="phase-header">
+                <span class="phase-name">Phase ${phase.phase}: ${phase.name}</span>
+                <span class="phase-badge">${(phase.files || []).length} files</span>
+            </div>
+            <ul class="phase-files">
+                ${(phase.files || []).map(f => `<li>${f}</li>`).join('')}
+            </ul>
+        `;
+        container.appendChild(div);
+    });
+}
+
+function cancelPlan() {
+    document.getElementById('plan-section').classList.remove('active');
+    document.getElementById('input-section').style.display = 'block';
+    currentPlan = null;
+}
+
+function approvePlan() {
+    if (!currentPlan) return;
+    const btn = document.getElementById('btn-approve');
+    btn.disabled = true;
+    btn.textContent = 'Starting build...';
+
+    fetch(API + '/build/approve/' + currentPlan.project_id, {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + token }
+    })
+    .then(r => { if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Build failed to start'); }); return r.json(); })
+    .then(result => {
+        document.getElementById('plan-section').classList.remove('active');
+        const buildSection = document.getElementById('building-section');
+        buildSection.classList.add('active');
+        document.getElementById('build-phase-name').textContent = 'Building: ' + (currentPlan.name || 'Your project');
+        document.getElementById('build-status').textContent = 'Build started. Generating files...';
+        document.getElementById('build-output').textContent = '> Build approved. Starting phase 1...\n';
+
+        // Poll for status or show completion
+        setTimeout(() => {
+            document.getElementById('build-output').textContent += '> Files are being generated. This may take a few minutes.\n> Check back on the dashboard for completed files.\n';
+            document.getElementById('progress-fill').style.width = '10%';
+        }, 2000);
+    })
+    .catch(err => {
+        alert(err.message);
+        btn.disabled = false;
+        btn.textContent = 'Approve and build';
+    });
+}
+</script>
+</body>
+</html>

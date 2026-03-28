@@ -16,6 +16,7 @@ from codey.saas.auth.dependencies import get_current_user
 from codey.saas.auth.jwt import decode_access_token
 from codey.saas.credits.service import CreditService, InsufficientCreditsError, CREDIT_COSTS
 from codey.saas.database import get_db
+from codey.saas.intelligence.providers import call_model, resolve_model
 from codey.saas.models import BuildCheckpoint, BuildFile, BuildProject, User
 
 router = APIRouter(prefix="/build", tags=["build"])
@@ -488,22 +489,46 @@ async def build_plan(
         "deployment": deployment,
     }
 
-    # Generate plan phases
+    # Generate plan using LLM
     phases: list[dict[str, Any]] = []
-    phase_names = [
-        "Project Setup & Configuration",
-        "Core Data Models & Database",
-        "Business Logic & Services",
-        "API Routes & Controllers",
-        "Frontend & Integration",
-    ][:total_phases]
-
-    files_per_phase = total_files // total_phases
     all_planned_files: list[str] = []
 
-    for i, phase_name in enumerate(phase_names):
-        count = files_per_phase if i < total_phases - 1 else total_files - files_per_phase * (total_phases - 1)
-        phase_files = [f"src/phase_{i + 1}_file_{j + 1}" for j in range(count)]
+    try:
+        provider, model = resolve_model("architecture")
+        plan_prompt = [
+            {"role": "system", "content": (
+                "You are a project architect. Given a project description, output a JSON build plan.\n"
+                "Return ONLY valid JSON with this structure:\n"
+                '{"phases": [{"name": "Phase Name", "files": ["path/to/file.py", ...]}], '
+                '"estimated_credits": number}\n'
+                "Use real file paths appropriate for the stack. 3-5 phases max."
+            )},
+            {"role": "user", "content": f"Project: {body.description}\nStack: {language}, {framework}, {database}"},
+        ]
+        import json as _json
+        raw = await call_model(provider, model, plan_prompt, max_tokens=2000, temperature=0.3)
+        # Extract JSON from response
+        json_match = raw
+        if "```" in raw:
+            import re
+            m = re.search(r"```(?:json)?\s*\n(.*?)```", raw, re.DOTALL)
+            if m:
+                json_match = m.group(1)
+        plan_data = _json.loads(json_match)
+        llm_phases = plan_data.get("phases", [])
+        if plan_data.get("estimated_credits"):
+            estimated_credits = plan_data["estimated_credits"]
+    except Exception:
+        # Fallback to static plan
+        llm_phases = [
+            {"name": "Project Setup & Configuration", "files": ["requirements.txt", "pyproject.toml", ".env.example", "Dockerfile"]},
+            {"name": "Core Data Models & Database", "files": ["app/models.py", "app/database.py", "migrations/init.sql"]},
+            {"name": "Business Logic & API", "files": ["app/main.py", "app/routes.py", "app/services.py", "app/auth.py"]},
+            {"name": "Tests & Documentation", "files": ["tests/test_routes.py", "tests/test_services.py", "README.md"]},
+        ][:total_phases]
+    for i, phase_info in enumerate(llm_phases):
+        phase_name = phase_info.get("name", f"Phase {i+1}")
+        phase_files = phase_info.get("files", [])
         all_planned_files.extend(phase_files)
         phases.append({
             "phase": i + 1,
@@ -511,6 +536,8 @@ async def build_plan(
             "files": phase_files,
             "description": f"Phase {i + 1}: {phase_name}",
         })
+    total_phases = len(phases) or 1
+    total_files = len(all_planned_files)
 
     # Build file tree
     file_tree_data: list[dict[str, Any]] = [
