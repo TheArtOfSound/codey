@@ -258,47 +258,97 @@ function handlePrompt() {
     btn.disabled = true;
     btn.textContent = 'Generating...';
 
-    fetch(API + '/sessions', {
+    fetch(API + '/sessions/prompt', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
             'Authorization': 'Bearer ' + token
         },
-        body: JSON.stringify({ prompt, mode: 'generate' })
+        body: JSON.stringify({ prompt })
     })
     .then(r => {
-        if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Session failed'); });
+        if (!r.ok) return r.json().then(d => {
+            const msg = typeof d.detail === 'string' ? d.detail : d.detail?.message || 'Session failed';
+            throw new Error(msg);
+        });
         return r.json();
     })
-    .then(session => {
+    .then(result => {
         // Add to sessions list
         const list = document.getElementById('sessions-list');
         const empty = list.querySelector('.empty-state');
         if (empty) empty.remove();
 
+        const status = result.status === 'completed' ? 'status-completed' : 'status-running';
+        const statusLabel = result.status === 'completed' ? 'Completed' : 'Running';
+        const linesInfo = result.lines_generated ? ` &middot; ${result.lines_generated} lines` : '';
+
         const item = document.createElement('div');
         item.className = 'session-item';
         item.innerHTML = `
-            <div class="session-prompt">${prompt}</div>
+            <div class="session-prompt">${escapeHtml(prompt)}</div>
             <div class="session-meta">
-                <span><span class="session-status status-running"></span> Running</span>
+                <span><span class="session-status ${status}"></span> ${statusLabel}${linesInfo}</span>
+                <span>${result.estimated_credits} credits</span>
                 <span>Just now</span>
             </div>
         `;
+
+        // Show generated code if available
+        if (result.output) {
+            const codeBlock = document.createElement('div');
+            codeBlock.style.cssText = 'margin-top: 12px; background: #0d1117; border: 1px solid #1e3a5f; border-radius: 6px; padding: 16px; overflow-x: auto; position: relative;';
+            const pre = document.createElement('pre');
+            pre.style.cssText = 'margin: 0; font-family: "JetBrains Mono", monospace; font-size: 13px; color: #e6edf3; line-height: 1.5; white-space: pre-wrap;';
+            pre.textContent = result.output;
+            const copyBtn = document.createElement('button');
+            copyBtn.textContent = 'Copy';
+            copyBtn.style.cssText = 'position: absolute; top: 8px; right: 8px; padding: 4px 12px; border-radius: 4px; border: 1px solid #1e3a5f; background: #111f38; color: #94a3b8; font-size: 12px; cursor: pointer; font-family: inherit;';
+            copyBtn.onclick = function() {
+                navigator.clipboard.writeText(result.output);
+                copyBtn.textContent = 'Copied';
+                setTimeout(() => copyBtn.textContent = 'Copy', 2000);
+            };
+            codeBlock.appendChild(copyBtn);
+            codeBlock.appendChild(pre);
+            item.appendChild(codeBlock);
+        }
+
         list.prepend(item);
 
         const count = document.getElementById('session-count');
         count.textContent = parseInt(count.textContent) + 1;
+
+        // Update credits
+        const creditsEl = document.getElementById('stat-credits');
+        const creditsNav = document.getElementById('credits-count');
+        const newCredits = Math.max(0, parseInt(creditsEl.textContent) - result.estimated_credits);
+        creditsEl.textContent = newCredits;
+        creditsNav.textContent = newCredits;
 
         input.value = '';
         btn.disabled = false;
         btn.textContent = 'Generate';
     })
     .catch(err => {
-        alert(err.message || 'Failed to create session. Check your credits.');
+        // Show error inline instead of alert
+        const list = document.getElementById('sessions-list');
+        const errItem = document.createElement('div');
+        errItem.className = 'session-item';
+        errItem.innerHTML = `
+            <div class="session-prompt" style="color: #ef4444;">${escapeHtml(err.message)}</div>
+            <div class="session-meta"><span>No credits charged</span></div>
+        `;
+        list.prepend(errItem);
         btn.disabled = false;
         btn.textContent = 'Generate';
     });
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 // Enter key to submit
