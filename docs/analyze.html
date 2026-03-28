@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analyze Codebase — Codey</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+        :root { --bg-deep: #050a12; --bg-surface: #0a1628; --bg-raised: #111f38; --border: #1e3a5f; --blue-primary: #2563eb; --blue-light: #60a5fa; --text-primary: #f1f5f9; --text-secondary: #94a3b8; --text-muted: #475569; --green: #22c55e; --yellow: #eab308; --red: #ef4444; }
+        body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg-deep); color: var(--text-primary); min-height: 100vh; }
+        .nav { position: sticky; top: 0; z-index: 100; background: var(--bg-deep); border-bottom: 1px solid var(--border); padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; }
+        .nav a { color: var(--text-primary); text-decoration: none; font-size: 20px; font-weight: 700; }
+        .nav span { color: var(--blue-light); }
+        .main { max-width: 800px; margin: 0 auto; padding: 48px 24px; }
+        h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
+        .subtitle { color: var(--text-secondary); font-size: 15px; margin-bottom: 32px; }
+
+        .drop-zone { border: 2px dashed var(--border); border-radius: 12px; padding: 48px; text-align: center; cursor: pointer; transition: all 200ms; }
+        .drop-zone:hover, .drop-zone.dragover { border-color: var(--blue-primary); background: rgba(37,99,235,0.05); }
+        .drop-zone .icon { font-size: 40px; margin-bottom: 12px; opacity: 0.5; }
+        .drop-zone p { color: var(--text-secondary); font-size: 14px; }
+        .drop-zone .or { color: var(--text-muted); font-size: 12px; margin: 8px 0; }
+        .paste-area { width: 100%; margin-top: 24px; }
+        .paste-area textarea { width: 100%; min-height: 200px; padding: 16px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-primary); font-family: 'JetBrains Mono', monospace; font-size: 13px; resize: vertical; outline: none; }
+        .paste-area textarea:focus { border-color: var(--blue-primary); }
+        .btn-analyze { margin-top: 16px; padding: 12px 32px; border-radius: 8px; border: none; background: var(--blue-primary); color: white; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; }
+        .btn-analyze:hover { filter: brightness(1.15); }
+        .btn-analyze:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* Report */
+        .report { display: none; margin-top: 32px; }
+        .report.active { display: block; }
+        .report-header { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+        .health-dot { width: 12px; height: 12px; border-radius: 50%; }
+        .report-phase { font-size: 20px; font-weight: 700; }
+        .report-score { font-size: 14px; color: var(--text-muted); margin-left: auto; }
+        .report-summary { font-size: 14px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 24px; padding: 16px; background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; }
+        .metrics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+        .metric { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; text-align: center; }
+        .metric .value { font-size: 24px; font-weight: 700; color: var(--blue-light); }
+        .metric .label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 4px; }
+        .recommendations { margin-top: 16px; }
+        .recommendations h3 { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+        .rec-item { font-size: 13px; color: var(--text-secondary); padding: 8px 0; padding-left: 16px; position: relative; border-bottom: 1px solid rgba(30,58,95,0.3); }
+        .rec-item::before { content: ''; position: absolute; left: 0; top: 14px; width: 6px; height: 6px; border-radius: 50%; background: var(--blue-light); }
+        .components { margin-top: 24px; }
+        .components h3 { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+        .comp-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid rgba(30,58,95,0.3); font-size: 13px; }
+        .comp-name { font-family: 'JetBrains Mono', monospace; color: var(--text-primary); flex: 1; }
+        .comp-stress { font-weight: 600; }
+        .back-link { text-align: center; margin-top: 32px; }
+        .back-link a { color: var(--blue-light); text-decoration: none; font-size: 14px; }
+        @media (max-width: 768px) { .metrics-grid { grid-template-columns: repeat(2, 1fr); } }
+    </style>
+</head>
+<body>
+<div class="nav">
+    <a href="dashboard.html"><span>[</span>ODEY</a>
+    <a href="dashboard.html" style="font-size: 13px; color: #94a3b8; text-decoration: none;">Dashboard</a>
+</div>
+
+<div class="main">
+    <h1>Analyze your codebase</h1>
+    <p class="subtitle">Paste code or upload files. Codey maps the dependency graph, computes structural health, and shows you exactly where the risks are.</p>
+
+    <div id="input-section">
+        <div class="paste-area">
+            <textarea id="code-input" placeholder="Paste your code here...&#10;&#10;Codey will parse it, build a dependency graph, and compute structural health metrics."></textarea>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-size: 12px; color: #475569;">Supports Python, JavaScript, TypeScript</span>
+                <button class="btn-analyze" id="btn-analyze" onclick="analyzeCode()">Analyze structure</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="report-section" class="report">
+        <div class="report-header">
+            <span class="health-dot" id="report-dot"></span>
+            <span class="report-phase" id="report-phase"></span>
+            <span class="report-score" id="report-score"></span>
+        </div>
+        <div class="report-summary" id="report-summary"></div>
+        <div class="metrics-grid">
+            <div class="metric"><div class="value" id="m-nodes">0</div><div class="label">Components</div></div>
+            <div class="metric"><div class="value" id="m-edges">0</div><div class="label">Dependencies</div></div>
+            <div class="metric"><div class="value" id="m-coherence">0%</div><div class="label">Coherence</div></div>
+            <div class="metric"><div class="value" id="m-stability">0%</div><div class="label">Stability</div></div>
+        </div>
+        <div class="recommendations" id="recommendations"></div>
+        <div class="components" id="components"></div>
+        <div style="margin-top: 16px;">
+            <button class="btn-analyze" onclick="resetAnalysis()">Analyze another</button>
+        </div>
+    </div>
+
+    <div class="back-link"><a href="dashboard.html">&larr; Back to dashboard</a></div>
+</div>
+
+<script>
+const API = 'https://codey-jc2r.onrender.com';
+const token = localStorage.getItem('codey_token');
+if (!token) window.location.href = 'login.html';
+
+function analyzeCode() {
+    const code = document.getElementById('code-input').value.trim();
+    if (!code) return;
+    const btn = document.getElementById('btn-analyze');
+    btn.disabled = true;
+    btn.textContent = 'Analyzing...';
+
+    fetch(API + '/analyze/code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify({ code, language: detectLanguage(code) })
+    })
+    .then(r => { if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Analysis failed'); }); return r.json(); })
+    .then(data => {
+        showReport(data);
+        btn.disabled = false;
+        btn.textContent = 'Analyze structure';
+    })
+    .catch(err => {
+        alert(err.message);
+        btn.disabled = false;
+        btn.textContent = 'Analyze structure';
+    });
+}
+
+function showReport(data) {
+    const r = data.report;
+    document.getElementById('input-section').style.display = 'none';
+    document.getElementById('report-section').classList.add('active');
+
+    const color = r.phase === 'Excellent' ? '#22c55e' : r.phase === 'Watch this' ? '#eab308' : '#ef4444';
+    document.getElementById('report-dot').style.background = color;
+    document.getElementById('report-phase').textContent = r.phase;
+    document.getElementById('report-phase').style.color = color;
+    document.getElementById('report-score').textContent = 'Health Score: ' + (r.health_score * 100).toFixed(0) + '%';
+    document.getElementById('report-summary').textContent = r.summary;
+    document.getElementById('m-nodes').textContent = r.total_nodes;
+    document.getElementById('m-edges').textContent = r.total_edges;
+    document.getElementById('m-coherence').textContent = (r.coherence * 100).toFixed(0) + '%';
+    document.getElementById('m-stability').textContent = (r.stability * 100).toFixed(0) + '%';
+
+    const recsDiv = document.getElementById('recommendations');
+    recsDiv.innerHTML = '<h3>Recommendations</h3>' + (data.recommendations || []).map(r => '<div class="rec-item">' + r + '</div>').join('');
+
+    const compsDiv = document.getElementById('components');
+    if (r.top_components && r.top_components.length) {
+        compsDiv.innerHTML = '<h3>Component Stress</h3>' + r.top_components.map(c => {
+            const stressColor = c.stress > 0.7 ? '#ef4444' : c.stress > 0.4 ? '#eab308' : '#22c55e';
+            return `<div class="comp-row"><span class="comp-name">${c.name}</span><span class="comp-stress" style="color:${stressColor}">${(c.stress * 100).toFixed(0)}%</span><span style="color:#475569">cascade: ${c.cascade_depth}</span></div>`;
+        }).join('');
+    }
+}
+
+function resetAnalysis() {
+    document.getElementById('input-section').style.display = 'block';
+    document.getElementById('report-section').classList.remove('active');
+}
+
+function detectLanguage(code) {
+    if (/\bdef\s+\w+|import\s+\w+|from\s+\w+/.test(code)) return 'python';
+    if (/\bfunction\s+\w+|const\s+|let\s+|=>\s*\{/.test(code)) return 'javascript';
+    return 'python';
+}
+</script>
+</body>
+</html>
