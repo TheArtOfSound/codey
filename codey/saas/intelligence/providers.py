@@ -69,18 +69,18 @@ PROVIDERS: dict[str, dict[str, str]] = {
 # ---------------------------------------------------------------------------
 
 MODELS: dict[str, dict[str, str]] = {
-    # All routes use OpenRouter free models until other provider keys are added.
-    # When Groq/Gemini/DeepSeek keys are set, resolve_model() will prefer them.
-    "fast_code": {"provider": "openrouter", "model": "meta-llama/llama-3.3-70b-instruct:free"},
-    "code_generation": {"provider": "openrouter", "model": "meta-llama/llama-3.3-70b-instruct:free"},
-    "code_review": {"provider": "openrouter", "model": "meta-llama/llama-3.3-70b-instruct:free"},
+    # Groq (primary — fastest inference, 370 tok/sec, 1000 req/day free)
+    "fast_code": {"provider": "groq", "model": "llama-3.3-70b-versatile"},
+    "code_generation": {"provider": "groq", "model": "llama-3.3-70b-versatile"},
+    "code_review": {"provider": "groq", "model": "llama-3.3-70b-versatile"},
+    "documentation": {"provider": "groq", "model": "llama-3.3-70b-versatile"},
+    "test_generation": {"provider": "groq", "model": "llama-3.3-70b-versatile"},
+    "debugging": {"provider": "groq", "model": "llama-3.3-70b-versatile"},
+    "default": {"provider": "groq", "model": "llama-3.3-70b-versatile"},
+    # OpenRouter for specialized tasks (variety of models)
     "architecture": {"provider": "openrouter", "model": "meta-llama/llama-3.3-70b-instruct:free"},
-    "documentation": {"provider": "openrouter", "model": "meta-llama/llama-3.3-70b-instruct:free"},
-    "test_generation": {"provider": "openrouter", "model": "meta-llama/llama-3.3-70b-instruct:free"},
-    "debugging": {"provider": "openrouter", "model": "meta-llama/llama-3.3-70b-instruct:free"},
     "security_audit": {"provider": "openrouter", "model": "meta-llama/llama-3.3-70b-instruct:free"},
     "long_context": {"provider": "openrouter", "model": "meta-llama/llama-3.3-70b-instruct:free"},
-    "default": {"provider": "openrouter", "model": "meta-llama/llama-3.3-70b-instruct:free"},
 }
 
 # Fallback models when primary is rate-limited (tried in order)
