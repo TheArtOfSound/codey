@@ -13,8 +13,6 @@ from codey.saas.models.base import Base
 class ApiKey(Base):
     __tablename__ = "api_keys"
 
-    # Remove inherited updated_at since schema doesn't include it
-    updated_at: Mapped[None] = None  # type: ignore[assignment]
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),

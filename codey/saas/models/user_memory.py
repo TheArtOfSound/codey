@@ -16,8 +16,6 @@ class UserMemory(Base):
     # Override Base.id — this table is keyed by user_id, not a separate id
     id: Mapped[None] = None  # type: ignore[assignment]
 
-    # Remove inherited updated_at — we use last_updated instead
-    updated_at: Mapped[None] = None  # type: ignore[assignment]
 
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),

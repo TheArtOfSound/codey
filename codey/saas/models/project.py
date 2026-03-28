@@ -17,8 +17,6 @@ if TYPE_CHECKING:
 class Project(Base):
     __tablename__ = "projects"
 
-    # Remove inherited updated_at since schema doesn't include it
-    updated_at: Mapped[None] = None  # type: ignore[assignment]
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),

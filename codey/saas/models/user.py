@@ -18,8 +18,6 @@ if TYPE_CHECKING:
 class User(Base):
     __tablename__ = "users"
 
-    # updated_at is now in the DB schema (inherited from Base)
-
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,

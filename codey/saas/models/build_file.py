@@ -16,8 +16,6 @@ if TYPE_CHECKING:
 class BuildFile(Base):
     __tablename__ = "build_files"
 
-    # Remove inherited updated_at and created_at — this model uses generated_at
-    updated_at: Mapped[None] = None  # type: ignore[assignment]
     created_at: Mapped[None] = None  # type: ignore[assignment]
 
     id: Mapped[uuid.UUID] = mapped_column(

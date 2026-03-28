@@ -16,8 +16,6 @@ if TYPE_CHECKING:
 class BuildCheckpoint(Base):
     __tablename__ = "build_checkpoints"
 
-    # Remove inherited updated_at and created_at — this model uses checkpoint_at
-    updated_at: Mapped[None] = None  # type: ignore[assignment]
     created_at: Mapped[None] = None  # type: ignore[assignment]
 
     id: Mapped[uuid.UUID] = mapped_column(

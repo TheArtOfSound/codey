@@ -19,8 +19,6 @@ class SecurityAuditLog(Base):
 
     __tablename__ = "security_audit_log"
 
-    # Override inherited updated_at — audit rows are immutable.
-    updated_at: Mapped[None] = None  # type: ignore[assignment]
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
