@@ -18,8 +18,7 @@ if TYPE_CHECKING:
 class User(Base):
     __tablename__ = "users"
 
-    # Remove inherited updated_at since schema doesn't include it
-    updated_at: Mapped[None] = None  # type: ignore[assignment]
+    # updated_at is now in the DB schema (inherited from Base)
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
