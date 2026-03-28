@@ -87,7 +87,7 @@ class Settings(BaseSettings):
     github_webhook_secret: str = ""
 
     class Config:
-        env_file = ".env"
+        env_file = ("/etc/secrets/.env", ".env")
         extra = "ignore"
 
 
