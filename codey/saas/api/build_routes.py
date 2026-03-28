@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from codey.saas.auth.dependencies import get_current_user
 from codey.saas.auth.jwt import decode_access_token
+from codey.saas.build_mode.engine import BuildEngine
 from codey.saas.credits.service import CreditService, InsufficientCreditsError, CREDIT_COSTS
 from codey.saas.database import get_db
 from codey.saas.intelligence.providers import call_model, resolve_model
