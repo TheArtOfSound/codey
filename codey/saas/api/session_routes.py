@@ -34,6 +34,17 @@ class PromptRequest(BaseModel):
     repo_id: str | None = None
 
 
+class HealthReport(BaseModel):
+    phase: str = ""
+    health_score: float = 0.0
+    coherence: float = 0.0
+    stability: float = 0.0
+    total_nodes: int = 0
+    total_edges: int = 0
+    summary: str = ""
+    recommendations: list[str] = []
+
+
 class PromptResponse(BaseModel):
     session_id: str
     estimated_credits: int
@@ -42,6 +53,7 @@ class PromptResponse(BaseModel):
     status: str = "running"
     security_score: float | None = None
     security_issues: list[str] = []
+    health: HealthReport | None = None
 
 
 class AnalyzeResponse(BaseModel):
@@ -157,6 +169,31 @@ async def create_prompt_session(
                 if i.severity in ("error", "warning")
             ]
 
+        # Run structural health analysis on generated code
+        health_report = None
+        try:
+            from codey.saas.api.health_analysis import _analyze_code
+            import re as _re
+            # Extract code from markdown fences
+            code_to_analyze = output
+            _m = _re.search(r"```(?:python|javascript|typescript|js|ts)?\s*\n(.*?)```", output, _re.DOTALL)
+            if _m:
+                code_to_analyze = _m.group(1)
+            lang = body.language or "python"
+            analysis = _analyze_code(code_to_analyze, f"generated.{lang[:2]}", lang)
+            health_report = HealthReport(
+                phase=analysis["phase"],
+                health_score=analysis["health_score"],
+                coherence=analysis["coherence"],
+                stability=analysis["stability"],
+                total_nodes=analysis["total_nodes"],
+                total_edges=analysis["total_edges"],
+                summary=analysis["summary"],
+                recommendations=analysis["recommendations"],
+            )
+        except Exception:
+            pass  # Don't fail the response if analysis errors
+
         session.status = "completed"
         session.output_summary = output
         session.lines_generated = lines
@@ -171,6 +208,7 @@ async def create_prompt_session(
             status="completed",
             security_score=sec_score,
             security_issues=sec_issues,
+            health=health_report,
         )
     except Exception as e:
         # Refund credits on failure

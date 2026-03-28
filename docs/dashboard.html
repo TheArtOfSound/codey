@@ -307,6 +307,30 @@ function handlePrompt() {
             </div>
         `;
 
+        // Show structural health report if available
+        if (result.health) {
+            const h = result.health;
+            const phaseColor = h.phase === 'Excellent' ? '#22c55e' : h.phase === 'Watch this' ? '#eab308' : '#ef4444';
+            const healthDiv = document.createElement('div');
+            healthDiv.style.cssText = 'margin-top: 12px; background: #0a1628; border: 1px solid ' + phaseColor + '40; border-radius: 6px; padding: 14px;';
+            healthDiv.innerHTML = `
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                    <span style="width: 8px; height: 8px; border-radius: 50%; background: ${phaseColor};"></span>
+                    <span style="font-size: 13px; font-weight: 600; color: ${phaseColor};">Structural Health: ${h.phase}</span>
+                    <span style="font-size: 12px; color: #475569; margin-left: auto;">Score: ${(h.health_score * 100).toFixed(0)}%</span>
+                </div>
+                <div style="font-size: 12px; color: #94a3b8; line-height: 1.5;">${h.summary}</div>
+                <div style="display: flex; gap: 16px; margin-top: 8px;">
+                    <span style="font-size: 11px; color: #475569;">${h.total_nodes} components</span>
+                    <span style="font-size: 11px; color: #475569;">${h.total_edges} dependencies</span>
+                    <span style="font-size: 11px; color: #475569;">Coherence: ${(h.coherence * 100).toFixed(0)}%</span>
+                    <span style="font-size: 11px; color: #475569;">Stability: ${(h.stability * 100).toFixed(0)}%</span>
+                </div>
+                ${h.recommendations && h.recommendations.length ? '<div style="margin-top: 8px; font-size: 11px; color: #60a5fa;">' + h.recommendations.map(r => '&bull; ' + r).join('<br>') + '</div>' : ''}
+            `;
+            item.appendChild(healthDiv);
+        }
+
         // Show generated code if available
         if (result.output) {
             const codeBlock = document.createElement('div');
