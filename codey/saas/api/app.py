@@ -33,7 +33,11 @@ if _sentry_dsn:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    await setup_stripe_products()
+    try:
+        await setup_stripe_products()
+    except Exception as e:
+        import logging
+        logging.getLogger("codey").warning(f"Stripe setup skipped: {e}")
     yield
 
 
