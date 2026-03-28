@@ -285,9 +285,16 @@ function handlePrompt() {
         const status = result.status === 'completed' ? 'status-completed' : 'status-running';
         const statusLabel = result.status === 'completed' ? 'Completed' : 'Running';
         const linesInfo = result.lines_generated ? ` &middot; ${result.lines_generated} lines` : '';
-        const securityBadge = result.status === 'completed'
-            ? ' &middot; <span style="color: #22c55e; font-weight: 600;">&#9679; Security: Clean</span>'
-            : '';
+        let securityBadge = '';
+        if (result.status === 'completed') {
+            const issues = result.security_issues || [];
+            const score = result.security_score;
+            if (issues.length === 0) {
+                securityBadge = ' &middot; <span style="color: #22c55e; font-weight: 600;">&#9679; Security: Clean</span>';
+            } else {
+                securityBadge = ` &middot; <span style="color: #eab308; font-weight: 600;">&#9679; Security: ${issues.length} issue${issues.length > 1 ? 's' : ''} found</span>`;
+            }
+        }
 
         const item = document.createElement('div');
         item.className = 'session-item';

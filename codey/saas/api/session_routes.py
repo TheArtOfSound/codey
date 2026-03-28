@@ -40,6 +40,8 @@ class PromptResponse(BaseModel):
     output: str | None = None
     lines_generated: int = 0
     status: str = "running"
+    security_score: float | None = None
+    security_issues: list[str] = []
 
 
 class AnalyzeResponse(BaseModel):
@@ -145,6 +147,16 @@ async def create_prompt_session(
         output = result.content
         lines = output.count("\n") + 1
 
+        # Extract security assessment if available
+        sec_score = None
+        sec_issues: list[str] = []
+        if result.assessment:
+            sec_score = result.assessment.score
+            sec_issues = [
+                i.message for i in result.assessment.issues
+                if i.severity in ("error", "warning")
+            ]
+
         session.status = "completed"
         session.output_summary = output
         session.lines_generated = lines
@@ -157,6 +169,8 @@ async def create_prompt_session(
             output=output,
             lines_generated=lines,
             status="completed",
+            security_score=sec_score,
+            security_issues=sec_issues,
         )
     except Exception as e:
         # Refund credits on failure
