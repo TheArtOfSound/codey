@@ -1,0 +1,88 @@
+{
+  "name": "codey",
+  "displayName": "Codey — Structural Coding Intelligence",
+  "description": "The coding AI that understands your codebase as a living network. Generate code, analyze structure, monitor health.",
+  "version": "1.0.0",
+  "publisher": "codey-qira",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Machine Learning",
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "codey.askAboutFile",
+        "title": "Codey: Ask about this file"
+      },
+      {
+        "command": "codey.generateCode",
+        "title": "Codey: Generate code from prompt"
+      },
+      {
+        "command": "codey.analyzeHealth",
+        "title": "Codey: Analyze structural health"
+      },
+      {
+        "command": "codey.showHealthPanel",
+        "title": "Codey: Show Health Panel"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "codey",
+          "title": "Codey",
+          "icon": "resources/codey-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "codey": [
+        {
+          "id": "codey.healthPanel",
+          "name": "Structural Health"
+        },
+        {
+          "id": "codey.sessionsPanel",
+          "name": "Recent Sessions"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Codey",
+      "properties": {
+        "codey.apiUrl": {
+          "type": "string",
+          "default": "https://codey-jc2r.onrender.com",
+          "description": "Codey API server URL"
+        },
+        "codey.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Your Codey API key (from Settings > API Keys)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "node-fetch": "^3.3.0"
+  }
+}
