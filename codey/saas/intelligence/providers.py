@@ -83,6 +83,13 @@ MODELS: dict[str, dict[str, str]] = {
     "default": {"provider": "openrouter", "model": "meta-llama/llama-3.3-70b-instruct:free"},
 }
 
+# Fallback models when primary is rate-limited
+FALLBACK_MODELS: list[dict[str, str]] = [
+    {"provider": "openrouter", "model": "mistralai/mistral-small-3.1-24b-instruct:free"},
+    {"provider": "openrouter", "model": "google/gemma-3-27b-it:free"},
+    {"provider": "openrouter", "model": "qwen/qwen3-32b:free"},
+]
+
 # ---------------------------------------------------------------------------
 # Client cache — one AsyncOpenAI instance per provider
 # ---------------------------------------------------------------------------
@@ -136,12 +143,44 @@ async def call_model(
 ) -> str:
     """Call *model* via *provider* and return the assistant's text response.
 
-    Supports all OpenAI-compatible providers.  For the ``anthropic`` provider
-    type, messages are sent through the OpenAI-compatible endpoint at
-    ``/v1/messages`` which Anthropic exposes.
+    Supports all OpenAI-compatible providers. Automatically falls back
+    to alternative models on 429 rate limit errors.
 
     Extra ``**kwargs`` are forwarded to ``chat.completions.create``.
     """
+    try:
+        return await _call_model_once(
+            provider, model, messages,
+            temperature=temperature, max_tokens=max_tokens,
+            stream=stream, **kwargs,
+        )
+    except Exception as e:
+        if "429" in str(e) or "rate" in str(e).lower():
+            logger.warning("Primary model %s/%s rate-limited, trying fallbacks", provider, model)
+            for fb in FALLBACK_MODELS:
+                try:
+                    return await _call_model_once(
+                        fb["provider"], fb["model"], messages,
+                        temperature=temperature, max_tokens=max_tokens,
+                        stream=stream, **kwargs,
+                    )
+                except Exception as fb_err:
+                    logger.warning("Fallback %s/%s failed: %s", fb["provider"], fb["model"], fb_err)
+                    continue
+        raise
+
+
+async def _call_model_once(
+    provider: str,
+    model: str,
+    messages: list[dict[str, str]],
+    *,
+    temperature: float = 0.3,
+    max_tokens: int = 4096,
+    stream: bool = False,
+    **kwargs: Any,
+) -> str:
+    """Single attempt to call a model. Raises on failure."""
     client = get_client(provider)
 
     create_kwargs: dict[str, Any] = {
