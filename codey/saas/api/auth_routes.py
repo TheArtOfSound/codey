@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from codey.saas.auth.oauth import oauth_github_url, oauth_google_url
 from codey.saas.auth.service import AuthService
 from codey.saas.database import get_db
+from codey.saas.security.audit import AuditLogger, ACTION_LOGIN_SUCCESS, ACTION_LOGIN_FAILURE
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -104,8 +105,14 @@ async def signup(body: SignupRequest, db: AsyncSession = Depends(get_db)) -> Aut
 @router.post("/login", response_model=AuthResponse)
 async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)) -> AuthResponse:
     auth_service = AuthService(db)
-    user, token = await auth_service.login(email=body.email, password=body.password)
-    return AuthResponse(user=_user_to_response(user), token=token)
+    audit = AuditLogger(db)
+    try:
+        user, token = await auth_service.login(email=body.email, password=body.password)
+        await audit.log(user_id=user.id, action=ACTION_LOGIN_SUCCESS, result="success")
+        return AuthResponse(user=_user_to_response(user), token=token)
+    except HTTPException:
+        await audit.log(user_id=None, action=ACTION_LOGIN_FAILURE, result="failure", failure_reason=f"Invalid credentials for {body.email}")
+        raise
 
 
 @router.get("/github", response_model=OAuthUrlResponse)
