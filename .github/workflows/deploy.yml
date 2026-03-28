@@ -1,0 +1,69 @@
+name: CI / Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: codey
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: codey_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U codey"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt && pip install pytest pytest-asyncio httpx
+
+      - name: Run tests
+        env:
+          DATABASE_URL: postgresql+asyncpg://codey:test@localhost:5432/codey_test
+          REDIS_URL: redis://localhost:6379/0
+          SECRET_KEY: ci-test-secret
+        run: pytest -x -q
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------
+      # Replace the placeholder below with your actual deploy command,
+      # e.g. Render, Railway, Fly.io, or docker push + SSH deploy.
+      # -----------------------------------------------------------------
+      - name: Deploy (placeholder)
+        run: echo "Deploy step — replace with actual deployment command"

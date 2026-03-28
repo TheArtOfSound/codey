@@ -425,6 +425,52 @@ CREATE POLICY build_checkpoints_owner ON build_checkpoints
     );
 
 -- ============================================================================
+-- PROJECT MEMORIES (pgvector)
+-- ============================================================================
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE IF NOT EXISTS project_memories (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id),
+    project_id UUID,
+    memory_type VARCHAR(50),
+    content TEXT,
+    embedding vector(768),
+    confidence REAL DEFAULT 1.0,
+    usage_count INTEGER DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    last_used TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_project_memories_user_id ON project_memories(user_id);
+CREATE INDEX IF NOT EXISTS idx_project_memories_embedding ON project_memories USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+
+ALTER TABLE project_memories ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY project_memories_owner ON project_memories
+    FOR ALL USING (user_id = auth.uid());
+
+-- ============================================================================
+-- COST OVERFLOW EVENTS
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS cost_overflow_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id UUID,
+    user_id UUID,
+    intended_provider VARCHAR(50),
+    actual_provider VARCHAR(50),
+    actual_cost_usd REAL,
+    credits_charged INTEGER,
+    margin_loss_usd REAL,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE cost_overflow_events ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY cost_overflow_events_owner ON cost_overflow_events
+    FOR ALL USING (user_id = auth.uid());
+
+-- ============================================================================
 -- SERVICE ROLE BYPASS
 -- Supabase service_role key bypasses RLS automatically.
 -- The FastAPI backend connects with the service_role key so it has full access.
