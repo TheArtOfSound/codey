@@ -45,14 +45,7 @@ class ProjectPlanner:
     """
 
     def __init__(self, api_key: str | None = None) -> None:
-        self._api_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
-        self._client: anthropic.AsyncAnthropic | None = None
         self._templates = TemplateLibrary()
-
-    def _get_client(self) -> anthropic.AsyncAnthropic:
-        if self._client is None:
-            self._client = anthropic.AsyncAnthropic(api_key=self._api_key)
-        return self._client
 
     async def clarify(self, user_description: str) -> dict[str, Any]:
         """Analyze the user's description and identify ambiguities.
@@ -77,7 +70,8 @@ class ProjectPlanner:
                 }
 
         # Use Claude to analyze the description and generate questions
-        client = self._get_client()
+        from codey.saas.intelligence.providers import call_model, resolve_model
+        provider, model = resolve_model('architecture')
 
         system = (
             "You are a project planning assistant. Analyze the user's project description "
@@ -101,10 +95,7 @@ class ProjectPlanner:
             messages=[{"role": "user", "content": user_description}],
         )
 
-        raw = ""
-        for block in response.content:
-            if block.type == "text":
-                raw += block.text
+        raw = raw_response
 
         parsed = self._extract_json(raw)
 
@@ -147,7 +138,8 @@ class ProjectPlanner:
         answers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Generate a fully custom project plan via Claude API."""
-        client = self._get_client()
+        from codey.saas.intelligence.providers import call_model, resolve_model
+        provider, model = resolve_model('architecture')
 
         # Build context with any clarification answers
         context = f"Project Description:\n{description}"
@@ -202,10 +194,7 @@ class ProjectPlanner:
             messages=[{"role": "user", "content": context}],
         )
 
-        raw = ""
-        for block in response.content:
-            if block.type == "text":
-                raw += block.text
+        raw = raw_response
 
         plan = self._extract_json(raw)
 

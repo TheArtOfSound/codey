@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Policy — Codey</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', system-ui, sans-serif; background: #050a12; color: #f1f5f9; max-width: 700px; margin: 0 auto; padding: 48px 24px; line-height: 1.7; }
+        a { color: #60a5fa; }
+        h1 { font-size: 28px; margin-bottom: 8px; }
+        .date { color: #475569; font-size: 13px; margin-bottom: 32px; }
+        h2 { font-size: 18px; margin-top: 32px; margin-bottom: 12px; color: #94a3b8; }
+        p, li { font-size: 14px; color: #94a3b8; margin-bottom: 12px; }
+        ul { padding-left: 20px; }
+        table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+        th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #1e3a5f; font-size: 13px; color: #94a3b8; }
+        th { color: #f1f5f9; font-weight: 600; }
+        .back { margin-top: 48px; }
+        .back a { font-size: 14px; }
+    </style>
+</head>
+<body>
+<h1>Privacy Policy</h1>
+<div class="date">Last updated: March 28, 2026</div>
+
+<h2>1. Data We Collect</h2>
+<ul>
+    <li><strong>Account data:</strong> Email, name, avatar (optional)</li>
+    <li><strong>Code and prompts:</strong> What you submit and what Codey generates</li>
+    <li><strong>Usage data:</strong> Session timestamps, credits used, features accessed</li>
+    <li><strong>Payment data:</strong> Processed by Stripe — we never store card numbers</li>
+    <li><strong>GitHub tokens:</strong> Encrypted at rest, used only for repo access you authorize</li>
+</ul>
+
+<h2>2. How We Use Your Data</h2>
+<ul>
+    <li>To provide the Codey service (code generation, analysis, builds)</li>
+    <li>To personalize your experience (memory system, preferences)</li>
+    <li>To process payments via Stripe</li>
+    <li>To send transactional emails (welcome, payment, low credits)</li>
+</ul>
+
+<h2>3. Data We Do NOT Collect or Share</h2>
+<ul>
+    <li>We do not sell your data to third parties</li>
+    <li>We do not use your code for model training without explicit opt-in</li>
+    <li>We do not share code with third parties except for service delivery (LLM providers for generation)</li>
+    <li>User code is never sent to error tracking (Sentry)</li>
+</ul>
+
+<h2>4. Data Retention</h2>
+<table>
+    <tr><th>Data</th><th>Retention</th><th>Notes</th></tr>
+    <tr><td>Uploaded code files</td><td>30 days</td><td>Auto-deleted, user can delete immediately</td></tr>
+    <tr><td>Session prompts/outputs</td><td>1 year</td><td>User can delete individual sessions</td></tr>
+    <tr><td>Credit transactions</td><td>7 years</td><td>Financial records, not user-deletable</td></tr>
+    <tr><td>Health snapshots</td><td>90 days</td><td>Older compressed to daily averages</td></tr>
+    <tr><td>Account data</td><td>Until deletion</td><td>Deleted within 30 days of request</td></tr>
+</table>
+
+<h2>5. Your Rights</h2>
+<ul>
+    <li><strong>Export:</strong> Full data export available anytime (code, memory, sessions, audit log)</li>
+    <li><strong>Delete:</strong> Account deletion removes all data within 30 days</li>
+    <li><strong>Edit:</strong> View and edit Codey's memory of you at /settings/memory</li>
+    <li><strong>Opt out:</strong> Disable memory, notifications, and cross-project learning</li>
+</ul>
+
+<h2>6. Security</h2>
+<p>All data encrypted in transit (TLS 1.3) and at rest (AES-256). GitHub tokens encrypted with AES-256-GCM. Passwords hashed with bcrypt (cost factor 12). JWT tokens expire in 7 days.</p>
+
+<h2>7. Contact</h2>
+<p>Privacy questions: <a href="mailto:privacy@codey.ai">privacy@codey.ai</a> or <a href="mailto:bryan@qira.ai">bryan@qira.ai</a></p>
+<p>Qira LLC, Phoenix, Arizona</p>
+
+<div class="back"><a href="index.html">&larr; Back to Codey</a></div>
+</body>
+</html>

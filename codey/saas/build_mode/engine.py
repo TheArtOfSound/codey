@@ -49,7 +49,7 @@ class BuildEngine:
         self.db = db
         self.user_id = user_id
 
-        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        api_key = None  # Uses provider system now
         self.planner = ProjectPlanner(api_key=api_key)
         self.decomposer = TaskDecomposer()
         self.generator = FileGenerator(api_key=api_key)

@@ -76,13 +76,7 @@ class FileGenerator:
     """
 
     def __init__(self, api_key: str | None = None) -> None:
-        self._api_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
-        self._client: anthropic.AsyncAnthropic | None = None
-
-    def _get_client(self) -> anthropic.AsyncAnthropic:
-        if self._client is None:
-            self._client = anthropic.AsyncAnthropic(api_key=self._api_key)
-        return self._client
+        self._api_key = api_key  # Kept for backward compat, but we use providers now
 
     async def generate_file(
         self,
@@ -93,25 +87,23 @@ class FileGenerator:
 
         Steps:
         1. Build the structured prompt with project plan, summaries, deps, NFET state
-        2. Call Claude API
+        2. Call LLM via provider system (Groq/OpenRouter/etc)
         3. Parse the response to extract clean file content
         4. Create a summary of the generated file
         5. Return GeneratedFile with content and metadata
         """
+        from codey.saas.intelligence.providers import call_model, resolve_model
+
         system_prompt, messages = self._build_generation_prompt(task, context)
 
-        client = self._get_client()
-        response = await client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=8192,
-            system=system_prompt,
-            messages=messages,
+        provider, model = resolve_model("code_generation")
+        api_messages = [
+            {"role": "system", "content": system_prompt},
+            *messages,
+        ]
+        raw_response = await call_model(
+            provider, model, api_messages, max_tokens=8192, temperature=0.2
         )
-
-        raw_response = ""
-        for block in response.content:
-            if block.type == "text":
-                raw_response += block.text
 
         content = self._parse_file_content(raw_response, task.file_path)
         line_count = content.count("\n") + 1 if content.strip() else 0
