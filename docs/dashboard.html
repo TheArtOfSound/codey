@@ -88,6 +88,8 @@
         .quick-action .qa-desc { font-size: 11px; color: var(--text-muted); }
 
         /* Responsive */
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
         @media (max-width: 768px) {
             .stats-row { grid-template-columns: repeat(2, 1fr); }
             .grid-2col { grid-template-columns: 1fr; }
@@ -337,7 +339,24 @@ function handlePrompt() {
             codeBlock.style.cssText = 'margin-top: 12px; background: #0d1117; border: 1px solid #1e3a5f; border-radius: 6px; padding: 16px; overflow-x: auto; position: relative;';
             const pre = document.createElement('pre');
             pre.style.cssText = 'margin: 0; font-family: "JetBrains Mono", monospace; font-size: 13px; color: #e6edf3; line-height: 1.5; white-space: pre-wrap;';
-            pre.textContent = result.output;
+            // Stream the code character by character for terminal feel
+            const fullCode = result.output;
+            pre.textContent = '';
+            const cursor = document.createElement('span');
+            cursor.style.cssText = 'display: inline-block; width: 8px; height: 16px; background: #60a5fa; animation: blink 800ms step-end infinite;';
+            pre.appendChild(cursor);
+            let charIdx = 0;
+            const streamInterval = setInterval(() => {
+                const chunk = fullCode.substring(charIdx, Math.min(charIdx + 3, fullCode.length));
+                cursor.before(document.createTextNode(chunk));
+                charIdx += 3;
+                // Auto-scroll
+                codeBlock.scrollTop = codeBlock.scrollHeight;
+                if (charIdx >= fullCode.length) {
+                    clearInterval(streamInterval);
+                    cursor.remove();
+                }
+            }, 8);
             const btnRow = document.createElement('div');
             btnRow.style.cssText = 'position: absolute; top: 8px; right: 8px; display: flex; gap: 6px;';
 
