@@ -10,8 +10,8 @@ export interface StreamMessage {
     | "log"
     | "code"
     | "plan"
-    | "nfet_before"
-    | "nfet_after"
+    | "health_before"
+    | "health_after"
     | "error"
     | "complete";
   data: unknown;
@@ -26,7 +26,7 @@ export interface CodeChunk {
   diff?: string;
 }
 
-export interface NfetReport {
+export interface HealthReport {
   score: number;
   grade: string;
   breakdown: Record<string, number>;
@@ -46,8 +46,8 @@ export interface SessionStreamState {
   status: string;
   connected: boolean;
   codeChunks: CodeChunk[];
-  nfetBefore: NfetReport | null;
-  nfetAfter: NfetReport | null;
+  healthBefore: HealthReport | null;
+  healthAfter: HealthReport | null;
   plan: SessionPlan | null;
   isComplete: boolean;
   error: string | null;
@@ -66,8 +66,8 @@ export function useSessionStream(sessionId: string | null): SessionStreamState {
   const [status, setStatus] = useState<string>("idle");
   const [connected, setConnected] = useState(false);
   const [codeChunks, setCodeChunks] = useState<CodeChunk[]>([]);
-  const [nfetBefore, setNfetBefore] = useState<NfetReport | null>(null);
-  const [nfetAfter, setNfetAfter] = useState<NfetReport | null>(null);
+  const [healthBefore, setHealthBefore] = useState<HealthReport | null>(null);
+  const [healthAfter, setHealthAfter] = useState<HealthReport | null>(null);
   const [plan, setPlan] = useState<SessionPlan | null>(null);
   const [isComplete, setIsComplete] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -85,8 +85,8 @@ export function useSessionStream(sessionId: string | null): SessionStreamState {
     setMessages([]);
     setStatus("idle");
     setCodeChunks([]);
-    setNfetBefore(null);
-    setNfetAfter(null);
+    setHealthBefore(null);
+    setHealthAfter(null);
     setPlan(null);
     setIsComplete(false);
     setError(null);
@@ -121,12 +121,12 @@ export function useSessionStream(sessionId: string | null): SessionStreamState {
         break;
       }
 
-      case "nfet_before":
-        setNfetBefore(msg.data as NfetReport);
+      case "health_before":
+        setHealthBefore(msg.data as HealthReport);
         break;
 
-      case "nfet_after":
-        setNfetAfter(msg.data as NfetReport);
+      case "health_after":
+        setHealthAfter(msg.data as HealthReport);
         break;
 
       case "error":
@@ -238,8 +238,8 @@ export function useSessionStream(sessionId: string | null): SessionStreamState {
     status,
     connected,
     codeChunks,
-    nfetBefore,
-    nfetAfter,
+    healthBefore,
+    healthAfter,
     plan,
     isComplete,
     error,

@@ -92,7 +92,7 @@ export default function ExportCenterPage() {
         setProjects([
           { id: "1", name: "codey-frontend", language: "TypeScript" },
           { id: "2", name: "api-service", language: "Python" },
-          { id: "3", name: "nfet-analyzer", language: "Rust" },
+          { id: "3", name: "structural-analyzer", language: "Rust" },
         ]);
         setHistory([
           {

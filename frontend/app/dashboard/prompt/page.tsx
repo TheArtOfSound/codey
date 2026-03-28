@@ -7,7 +7,7 @@ import { api, type Repo } from "@/lib/api";
 import {
   useSessionStream,
   type CodeChunk,
-  type NfetReport,
+  type HealthReport,
 } from "@/lib/websocket";
 import {
   Zap,
@@ -45,7 +45,7 @@ const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type PageState = "input" | "streaming";
-type StreamTab = "code" | "explanation" | "nfet";
+type StreamTab = "code" | "explanation" | "health";
 
 const LANGUAGES = [
   { value: "auto", label: "Auto-detect" },
@@ -128,7 +128,7 @@ function RenderMarkdown({ text }: { text: string }) {
 
 // ── Health Delta Display ──────────────────────────────────────────────────────
 
-function NfetDelta({
+function HealthDelta({
   label,
   before,
   after,
@@ -170,7 +170,7 @@ function NfetDelta({
   );
 }
 
-function NfetGrade({ report }: { report: NfetReport }) {
+function HealthGrade({ report }: { report: HealthReport }) {
   const gradeColor =
     report.grade === "A" || report.grade === "B"
       ? "text-codey-green"
@@ -597,7 +597,7 @@ export default function PromptPage() {
           [
             { id: "code", label: "Code", icon: FileCode },
             { id: "explanation", label: "Explanation", icon: BookOpen },
-            { id: "nfet", label: "Structural Impact", icon: Activity },
+            { id: "health", label: "Structural Impact", icon: Activity },
           ] as const
         ).map((tab) => (
           <button
@@ -683,48 +683,48 @@ export default function PromptPage() {
       )}
 
       {/* ── Structural Impact Tab ────────────────────────────────────── */}
-      {activeTab === "nfet" && (
+      {activeTab === "health" && (
         <div className="space-y-4">
-          {stream.nfetBefore || stream.nfetAfter ? (
+          {stream.healthBefore || stream.healthAfter ? (
             <>
               {/* Before/After Grade Cards */}
               <div className="grid gap-4 sm:grid-cols-2">
-                {stream.nfetBefore && (
+                {stream.healthBefore && (
                   <div>
                     <p className="mb-2 text-xs font-medium uppercase tracking-wider text-codey-text-muted">
                       Before
                     </p>
-                    <NfetGrade report={stream.nfetBefore} />
+                    <HealthGrade report={stream.healthBefore} />
                   </div>
                 )}
-                {stream.nfetAfter && (
+                {stream.healthAfter && (
                   <div>
                     <p className="mb-2 text-xs font-medium uppercase tracking-wider text-codey-text-muted">
                       After
                     </p>
-                    <NfetGrade report={stream.nfetAfter} />
+                    <HealthGrade report={stream.healthAfter} />
                   </div>
                 )}
               </div>
 
               {/* Metric deltas */}
-              {stream.nfetBefore && stream.nfetAfter && (
+              {stream.healthBefore && stream.healthAfter && (
                 <div className="rounded-xl border border-codey-border bg-codey-card p-5">
                   <h3 className="mb-3 text-sm font-semibold text-codey-text">
                     Metric Deltas
                   </h3>
                   <div className="space-y-2">
-                    <NfetDelta
+                    <HealthDelta
                       label="Overall Score"
-                      before={stream.nfetBefore.score}
-                      after={stream.nfetAfter.score}
+                      before={stream.healthBefore.score}
+                      after={stream.healthAfter.score}
                     />
-                    {Object.keys(stream.nfetAfter.breakdown).map((key) => (
-                      <NfetDelta
+                    {Object.keys(stream.healthAfter.breakdown).map((key) => (
+                      <HealthDelta
                         key={key}
                         label={key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
-                        before={stream.nfetBefore?.breakdown[key]}
-                        after={stream.nfetAfter?.breakdown[key]}
+                        before={stream.healthBefore?.breakdown[key]}
+                        after={stream.healthAfter?.breakdown[key]}
                       />
                     ))}
                   </div>
@@ -732,7 +732,7 @@ export default function PromptPage() {
               )}
 
               {/* Affected components */}
-              {stream.nfetAfter?.breakdown && (
+              {stream.healthAfter?.breakdown && (
                 <div className="rounded-xl border border-codey-border bg-codey-card p-5">
                   <h3 className="mb-3 text-sm font-semibold text-codey-text">
                     Affected Components
@@ -740,9 +740,9 @@ export default function PromptPage() {
                   <div className="space-y-1.5">
                     {stream.codeChunks.map((chunk, i) => {
                       const improved =
-                        stream.nfetAfter &&
-                        stream.nfetBefore &&
-                        stream.nfetAfter.score > stream.nfetBefore.score;
+                        stream.healthAfter &&
+                        stream.healthBefore &&
+                        stream.healthAfter.score > stream.healthBefore.score;
                       return (
                         <div
                           key={i}

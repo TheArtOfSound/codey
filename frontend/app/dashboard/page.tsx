@@ -47,7 +47,7 @@ function statusColor(status: Session["status"]): string {
   }
 }
 
-function nfetPhase(score: number | null): {
+function healthPhase(score: number | null): {
   label: string;
   color: string;
   bg: string;
@@ -256,7 +256,7 @@ export default function DashboardPage() {
               </thead>
               <tbody>
                 {sessions.map((session) => {
-                  const phase = nfetPhase(session.nfet_score_after);
+                  const phase = healthPhase(session.health_score_after);
                   return (
                     <tr
                       key={session.id}
@@ -284,7 +284,7 @@ export default function DashboardPage() {
                         {session.credits_used}
                       </td>
                       <td className="hidden px-5 py-3 lg:table-cell">
-                        {session.nfet_score_after !== null ? (
+                        {session.health_score_after !== null ? (
                           <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${phase.bg} ${phase.color}`}>
                             {phase.label}
                           </span>
@@ -323,7 +323,7 @@ export default function DashboardPage() {
         ) : (
           <div className="divide-y divide-codey-border/50">
             {repos.map((repo) => {
-              const phase = nfetPhase(repo.nfet_score);
+              const phase = healthPhase(repo.health_score);
               return (
                 <div
                   key={repo.id}

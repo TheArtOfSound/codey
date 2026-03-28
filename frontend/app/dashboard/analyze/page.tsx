@@ -22,9 +22,9 @@ interface AnalysisResult {
   grade: string;
   phase: string;
   metrics: {
-    kappa: number;
-    sigma: number;
-    es: number;
+    coherence: number;
+    stability: number;
+    health: number;
     coupling: number;
     complexity: number;
   };
@@ -113,9 +113,9 @@ export default function AnalyzePage() {
         grade: "B",
         phase: "Healthy",
         metrics: {
-          kappa: 0.68,
-          sigma: 0.75,
-          es: 0.72,
+          coherence: 0.68,
+          stability: 0.75,
+          health: 0.72,
           coupling: 0.31,
           complexity: 0.45,
         },

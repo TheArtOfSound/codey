@@ -74,7 +74,7 @@ function modeIcon(mode: string) {
   }
 }
 
-function nfetPhase(score: number | null): { label: string; color: string; bg: string } {
+function healthPhase(score: number | null): { label: string; color: string; bg: string } {
   if (score === null) return { label: "N/A", color: "text-codey-text-dim", bg: "bg-codey-card" };
   if (score >= 0.7) return { label: "Healthy", color: "text-codey-green", bg: "bg-codey-green/20" };
   if (score >= 0.4) return { label: "Watch", color: "text-codey-yellow", bg: "bg-codey-yellow/20" };
@@ -215,7 +215,7 @@ export default function SessionsPage() {
                   const isExpanded = expandedId === session.id;
                   const mode = modeFromPrompt(session.prompt);
                   const ModeIcon = modeIcon(mode);
-                  const phase = nfetPhase(session.nfet_score_after);
+                  const phase = healthPhase(session.health_score_after);
 
                   return (
                     <>
@@ -255,7 +255,7 @@ export default function SessionsPage() {
                           </span>
                         </td>
                         <td className="hidden px-5 py-3 lg:table-cell">
-                          {session.nfet_score_after !== null ? (
+                          {session.health_score_after !== null ? (
                             <span
                               className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${phase.bg} ${phase.color}`}
                             >
@@ -308,30 +308,30 @@ export default function SessionsPage() {
 
                               {/* Health Impact */}
                               <div className="flex flex-wrap gap-4">
-                                {session.nfet_score_before !== null && (
+                                {session.health_score_before !== null && (
                                   <div className="rounded-lg bg-codey-card px-4 py-3">
                                     <p className="text-xs text-codey-text-muted">
                                       Health Before
                                     </p>
                                     <p className="mt-1 text-lg font-bold text-codey-text">
-                                      {session.nfet_score_before.toFixed(3)}
+                                      {session.health_score_before.toFixed(3)}
                                     </p>
                                   </div>
                                 )}
-                                {session.nfet_score_after !== null && (
+                                {session.health_score_after !== null && (
                                   <div className="rounded-lg bg-codey-card px-4 py-3">
                                     <p className="text-xs text-codey-text-muted">
                                       Health After
                                     </p>
                                     <p
                                       className={`mt-1 text-lg font-bold ${
-                                        session.nfet_score_after >
-                                        (session.nfet_score_before ?? 0)
+                                        session.health_score_after >
+                                        (session.health_score_before ?? 0)
                                           ? "text-codey-green"
                                           : "text-codey-red"
                                       }`}
                                     >
-                                      {session.nfet_score_after.toFixed(3)}
+                                      {session.health_score_after.toFixed(3)}
                                     </p>
                                   </div>
                                 )}

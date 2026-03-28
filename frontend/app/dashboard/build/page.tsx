@@ -114,10 +114,10 @@ interface BuildFileStatus {
   validation_passed: boolean | null;
 }
 
-interface NfetHealth {
+interface StructuralHealth {
   es_score: number;
-  kappa: number;
-  sigma: number;
+  coherence: number;
+  stability: number;
   phase: string;
 }
 
@@ -129,7 +129,7 @@ interface BuildStreamMessage {
     | "file_chunk"
     | "file_complete"
     | "checkpoint"
-    | "nfet"
+    | "health"
     | "error"
     | "complete"
     | "pong";
@@ -145,7 +145,7 @@ interface CheckpointData {
   tests_passed: number;
   tests_failed: number;
   test_details: Array<{ name: string; passed: boolean; detail?: string }>;
-  nfet: NfetHealth | null;
+  health: StructuralHealth | null;
 }
 
 interface CompletionStats {
@@ -153,8 +153,8 @@ interface CompletionStats {
   total_lines: number;
   languages: string[];
   test_coverage: number;
-  nfet_grade: string;
-  nfet_es_score: number;
+  health_grade: string;
+  health_es_score: number;
   credits_charged: number;
 }
 
@@ -249,7 +249,7 @@ const TEMPLATES: TemplateCard[] = [
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function nfetGradeFromScore(score: number): string {
+function healthGradeFromScore(score: number): string {
   if (score >= 0.85) return "A";
   if (score >= 0.7) return "B";
   if (score >= 0.5) return "C";
@@ -300,7 +300,7 @@ function monacoLangFromPath(filePath: string): string {
 
 // ── Health Gauge Component ────────────────────────────────────────────────────
 
-function NfetGauge({
+function HealthGauge({
   label,
   value,
   max = 1,
@@ -496,7 +496,7 @@ export default function BuildPage() {
   const [totalFiles, setTotalFiles] = useState(0);
   const [creditsUsed, setCreditsUsed] = useState(0);
   const [linesGenerated, setLinesGenerated] = useState(0);
-  const [nfetHealth, setNfetHealth] = useState<NfetHealth | null>(null);
+  const [structuralHealth, setStructuralHealth] = useState<StructuralHealth | null>(null);
   const [interventionAlerts, setInterventionAlerts] = useState<string[]>([]);
   const [wsConnected, setWsConnected] = useState(false);
 
@@ -672,28 +672,28 @@ export default function BuildPage() {
             tests_passed: data.tests_passed as number,
             tests_failed: data.tests_failed as number,
             test_details: (data.test_details as CheckpointData["test_details"]) || [],
-            nfet: (data.nfet as NfetHealth) || null,
+            health: (data.health as StructuralHealth) || null,
           };
           setCheckpoint(cpData);
-          if (cpData.nfet) setNfetHealth(cpData.nfet);
+          if (cpData.health) setStructuralHealth(cpData.health);
           setBuildState("CHECKPOINT");
           break;
         }
 
-        case "nfet": {
-          const nfet: NfetHealth = {
+        case "health": {
+          const healthData: StructuralHealth = {
             es_score: data.es_score as number,
-            kappa: data.kappa as number,
-            sigma: data.sigma as number,
+            coherence: data.coherence as number,
+            stability: data.stability as number,
             phase: data.phase as string,
           };
-          setNfetHealth(nfet);
+          setStructuralHealth(healthData);
 
           // Check for architecture interventions
-          if (nfet.es_score < 0.4) {
+          if (healthData.es_score < 0.4) {
             setInterventionAlerts((prev) => [
               ...prev.slice(-4),
-              `Architecture stress detected: ES=${nfet.es_score.toFixed(3)}. Codey is restructuring.`,
+              `Architecture stress detected: ES=${healthData.es_score.toFixed(3)}. Codey is restructuring.`,
             ]);
           }
           break;
@@ -714,8 +714,8 @@ export default function BuildPage() {
             total_lines: data.total_lines as number,
             languages: (data.languages as string[]) || [],
             test_coverage: (data.test_coverage as number) || 0,
-            nfet_grade: (data.nfet_grade as string) || "B",
-            nfet_es_score: (data.nfet_es_score as number) || 0,
+            health_grade: (data.health_grade as string) || "B",
+            health_es_score: (data.health_es_score as number) || 0,
             credits_charged: (data.credits_charged as number) || 0,
           };
           setCompletionStats(stats);
@@ -849,7 +849,7 @@ export default function BuildPage() {
     setTotalFiles(0);
     setCreditsUsed(0);
     setLinesGenerated(0);
-    setNfetHealth(null);
+    setStructuralHealth(null);
     setInterventionAlerts([]);
     setCheckpoint(null);
     setCompletionStats(null);
@@ -1400,22 +1400,22 @@ export default function BuildPage() {
 
             {/* Health Gauges */}
             <div className="space-y-4 border-b border-codey-border/50 px-4 py-4">
-              <NfetGauge
+              <HealthGauge
                 label="Health Score"
-                value={nfetHealth?.es_score ?? 0}
+                value={structuralHealth?.es_score ?? 0}
               />
-              <NfetGauge
+              <HealthGauge
                 label="Coupling"
-                value={nfetHealth?.kappa ?? 0}
+                value={structuralHealth?.coherence ?? 0}
               />
-              <NfetGauge
+              <HealthGauge
                 label="Stability"
-                value={nfetHealth?.sigma ?? 0}
+                value={structuralHealth?.stability ?? 0}
               />
             </div>
 
             {/* Phase badge */}
-            {nfetHealth?.phase && (
+            {structuralHealth?.phase && (
               <div className="border-b border-codey-border/50 px-4 py-3">
                 <span className="text-[10px] uppercase tracking-wider text-codey-text-muted">
                   Health Status
@@ -1423,7 +1423,7 @@ export default function BuildPage() {
                 <div className="mt-1 flex items-center gap-2">
                   <Cpu className="h-3.5 w-3.5 text-codey-text-dim" />
                   <span className="text-xs font-medium text-codey-text">
-                    {nfetHealth.phase}
+                    {structuralHealth.phase}
                   </span>
                 </div>
               </div>
@@ -1603,18 +1603,18 @@ export default function BuildPage() {
         )}
 
         {/* Health snapshot */}
-        {checkpoint.nfet && (
+        {checkpoint.health && (
           <div className="rounded-xl border border-codey-border bg-codey-card p-5">
             <h3 className="mb-4 text-sm font-semibold text-codey-text">
               Health Snapshot
             </h3>
             <div className="grid grid-cols-3 gap-4">
-              <NfetGauge
+              <HealthGauge
                 label="Health Score"
-                value={checkpoint.nfet.es_score}
+                value={checkpoint.health.es_score}
               />
-              <NfetGauge label="Coupling" value={checkpoint.nfet.kappa} />
-              <NfetGauge label="Stability" value={checkpoint.nfet.sigma} />
+              <HealthGauge label="Coupling" value={checkpoint.health.coherence} />
+              <HealthGauge label="Stability" value={checkpoint.health.stability} />
             </div>
           </div>
         )}
@@ -1712,7 +1712,7 @@ export default function BuildPage() {
   // ══════════════════════════════════════════════════════════════════════════════
 
   if (buildState === "COMPLETE" && completionStats) {
-    const grade = completionStats.nfet_grade;
+    const grade = completionStats.health_grade;
 
     return (
       <div className="mx-auto max-w-3xl space-y-8">
@@ -1780,7 +1780,7 @@ export default function BuildPage() {
               Structural Health Grade
             </p>
             <p className="mt-0.5 text-xs text-codey-text-dim">
-              Health Score: {completionStats.nfet_es_score.toFixed(3)}
+              Health Score: {completionStats.health_es_score.toFixed(3)}
             </p>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {completionStats.languages.map((lang) => (

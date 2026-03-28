@@ -37,8 +37,8 @@ export interface Session {
   prompt: string;
   status: "queued" | "running" | "completed" | "failed" | "cancelled";
   credits_used: number;
-  nfet_score_before: number | null;
-  nfet_score_after: number | null;
+  health_score_before: number | null;
+  health_score_after: number | null;
   plan: string | null;
   result_summary: string | null;
   created_at: string;
@@ -51,7 +51,7 @@ export interface Repo {
   name: string;
   default_branch: string;
   last_analyzed_at: string | null;
-  nfet_score: number | null;
+  health_score: number | null;
   connected_at: string;
 }
 
@@ -307,7 +307,7 @@ class ApiClient {
     return this.request<void>(`/repos/${id}`, { method: "DELETE" });
   }
 
-  async analyzeRepo(id: string): Promise<{ nfet_score: number }> {
+  async analyzeRepo(id: string): Promise<{ health_score: number }> {
     return this.request(`/repos/${id}/analyze`, { method: "POST" });
   }
 

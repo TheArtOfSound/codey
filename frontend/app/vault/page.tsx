@@ -29,7 +29,7 @@ interface VaultProject {
   language: string;
   last_active: string;
   line_count: number;
-  nfet_score: number | null;
+  health_score: number | null;
   session_count: number;
   versions: VaultVersion[];
   file_tree: FileNode[];
@@ -39,7 +39,7 @@ interface VaultVersion {
   id: string;
   version: number;
   created_at: string;
-  nfet_score: number | null;
+  health_score: number | null;
   prompt_summary: string;
   lines_changed: number;
 }
@@ -65,7 +65,7 @@ function relativeTime(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString();
 }
 
-function nfetPhase(score: number | null): { label: string; color: string; bg: string } {
+function healthPhase(score: number | null): { label: string; color: string; bg: string } {
   if (score === null) return { label: "N/A", color: "text-codey-text-dim", bg: "bg-codey-card" };
   if (score >= 0.7) return { label: "Healthy", color: "text-codey-green", bg: "bg-codey-green/20" };
   if (score >= 0.4) return { label: "Watch", color: "text-codey-yellow", bg: "bg-codey-yellow/20" };
@@ -172,12 +172,12 @@ export default function VaultPage() {
             language: "TypeScript",
             last_active: new Date(Date.now() - 3600_000).toISOString(),
             line_count: 12450,
-            nfet_score: 0.82,
+            health_score: 0.82,
             session_count: 14,
             versions: [
-              { id: "v3", version: 3, created_at: new Date(Date.now() - 3600_000).toISOString(), nfet_score: 0.82, prompt_summary: "Add settings page with billing", lines_changed: 340 },
-              { id: "v2", version: 2, created_at: new Date(Date.now() - 86400_000).toISOString(), nfet_score: 0.78, prompt_summary: "Implement dashboard and sessions", lines_changed: 890 },
-              { id: "v1", version: 1, created_at: new Date(Date.now() - 172800_000).toISOString(), nfet_score: 0.65, prompt_summary: "Initial scaffold with auth", lines_changed: 2100 },
+              { id: "v3", version: 3, created_at: new Date(Date.now() - 3600_000).toISOString(), health_score: 0.82, prompt_summary: "Add settings page with billing", lines_changed: 340 },
+              { id: "v2", version: 2, created_at: new Date(Date.now() - 86400_000).toISOString(), health_score: 0.78, prompt_summary: "Implement dashboard and sessions", lines_changed: 890 },
+              { id: "v1", version: 1, created_at: new Date(Date.now() - 172800_000).toISOString(), health_score: 0.65, prompt_summary: "Initial scaffold with auth", lines_changed: 2100 },
             ],
             file_tree: [
               { name: "app", type: "directory", children: [
@@ -206,11 +206,11 @@ export default function VaultPage() {
             language: "Python",
             last_active: new Date(Date.now() - 7200_000).toISOString(),
             line_count: 8320,
-            nfet_score: 0.74,
+            health_score: 0.74,
             session_count: 9,
             versions: [
-              { id: "v2", version: 2, created_at: new Date(Date.now() - 7200_000).toISOString(), nfet_score: 0.74, prompt_summary: "Add analysis endpoints", lines_changed: 450 },
-              { id: "v1", version: 1, created_at: new Date(Date.now() - 259200_000).toISOString(), nfet_score: 0.61, prompt_summary: "FastAPI scaffold with auth routes", lines_changed: 1800 },
+              { id: "v2", version: 2, created_at: new Date(Date.now() - 7200_000).toISOString(), health_score: 0.74, prompt_summary: "Add analysis endpoints", lines_changed: 450 },
+              { id: "v1", version: 1, created_at: new Date(Date.now() - 259200_000).toISOString(), health_score: 0.61, prompt_summary: "FastAPI scaffold with auth routes", lines_changed: 1800 },
             ],
             file_tree: [
               { name: "src", type: "directory", children: [
@@ -228,14 +228,14 @@ export default function VaultPage() {
           },
           {
             id: "3",
-            name: "nfet-analyzer",
+            name: "structural-analyzer",
             language: "Rust",
             last_active: new Date(Date.now() - 432000_000).toISOString(),
             line_count: 3200,
-            nfet_score: 0.91,
+            health_score: 0.91,
             session_count: 4,
             versions: [
-              { id: "v1", version: 1, created_at: new Date(Date.now() - 432000_000).toISOString(), nfet_score: 0.91, prompt_summary: "Core analysis engine", lines_changed: 3200 },
+              { id: "v1", version: 1, created_at: new Date(Date.now() - 432000_000).toISOString(), health_score: 0.91, prompt_summary: "Core analysis engine", lines_changed: 3200 },
             ],
             file_tree: [
               { name: "src", type: "directory", children: [
@@ -268,7 +268,7 @@ export default function VaultPage() {
   }
 
   const currentVersion = selectedProject?.versions[selectedVersion];
-  const currentNfet = currentVersion ? nfetPhase(currentVersion.nfet_score) : null;
+  const currentHealth = currentVersion ? healthPhase(currentVersion.health_score) : null;
 
   if (loading) {
     return (
@@ -328,7 +328,7 @@ export default function VaultPage() {
 
           <div className={`grid gap-3 ${selectedProject ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"}`}>
             {filteredProjects.map((project) => {
-              const phase = nfetPhase(project.nfet_score);
+              const phase = healthPhase(project.health_score);
               const isSelected = selectedProject?.id === project.id;
 
               return (
@@ -400,7 +400,7 @@ export default function VaultPage() {
                 {/* Horizontal timeline slider */}
                 <div className="flex items-center gap-2 overflow-x-auto pb-2">
                   {selectedProject.versions.map((version, idx) => {
-                    const vPhase = nfetPhase(version.nfet_score);
+                    const vPhase = healthPhase(version.health_score);
                     const isActive = idx === selectedVersion;
                     return (
                       <button
@@ -416,7 +416,7 @@ export default function VaultPage() {
                           v{version.version}
                         </span>
                         <span className={`inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-medium ${vPhase.bg} ${vPhase.color}`}>
-                          {version.nfet_score !== null ? (version.nfet_score * 100).toFixed(0) : "--"}
+                          {version.health_score !== null ? (version.health_score * 100).toFixed(0) : "--"}
                         </span>
                         <span className="text-[10px] text-codey-text-muted">
                           {new Date(version.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
@@ -440,9 +440,9 @@ export default function VaultPage() {
                         <div className="mt-2 flex items-center gap-3 text-xs text-codey-text-muted">
                           <span>{relativeTime(currentVersion.created_at)}</span>
                           <span>{currentVersion.lines_changed} lines changed</span>
-                          {currentNfet && (
-                            <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 font-medium ${currentNfet.bg} ${currentNfet.color}`}>
-                              Health: {currentNfet.label}
+                          {currentHealth && (
+                            <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 font-medium ${currentHealth.bg} ${currentHealth.color}`}>
+                              Health: {currentHealth.label}
                             </span>
                           )}
                         </div>
