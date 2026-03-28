@@ -6,12 +6,19 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from codey.saas.config import settings
 
+import ssl as _ssl
+
+_ssl_context = _ssl.create_default_context()
+_ssl_context.check_hostname = False
+_ssl_context.verify_mode = _ssl.CERT_NONE
+
 engine = create_async_engine(
     settings.database_url,
     echo=False,
-    pool_size=20,
-    max_overflow=10,
+    pool_size=5,
+    max_overflow=5,
     pool_pre_ping=True,
+    connect_args={"ssl": _ssl_context},
 )
 
 async_session_factory = async_sessionmaker(
