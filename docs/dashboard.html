@@ -485,13 +485,17 @@ function runCode(rawOutput, btn, codeBlock) {
     const match = rawOutput.match(/```(?:python|javascript|js|typescript|ts|go|rust)?\s*\n([\s\S]*?)```/);
     if (match) code = match[1].trim();
 
-    btn.textContent = 'Running...';
+    btn.textContent = 'Connecting...';
     btn.disabled = true;
 
-    fetch(API + '/sessions/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-        body: JSON.stringify({ code, language: 'python' })
+    // Wake the backend first, then run
+    fetch(API + '/health').catch(() => {}).then(() => {
+        btn.textContent = 'Running...';
+        return fetch(API + '/sessions/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+            body: JSON.stringify({ code, language: 'python' })
+        });
     })
     .then(r => {
         if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Run failed'); });
