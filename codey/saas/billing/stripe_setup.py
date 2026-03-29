@@ -15,9 +15,13 @@ _METADATA_APP_KEY = "codey_entity"
 async def setup_stripe_products() -> None:
     # Set API key at call time, not import time — ensures secret file is loaded
     import os
-    stripe.api_key = os.environ.get("STRIPE_SECRET_KEY") or settings.stripe_secret_key
-    if not stripe.api_key or stripe.api_key.startswith("mk_"):
-        logger.warning("Stripe setup skipped: no valid API key")
+    key = os.environ.get("STRIPE_SECRET_KEY", "")
+    if not key or key.startswith("mk_"):
+        key = settings.stripe_secret_key
+    stripe.api_key = key
+    logger.info("Stripe setup: key prefix=%s, length=%d", key[:7] if key else "NONE", len(key))
+    if not key or not key.startswith("sk_"):
+        logger.warning("Stripe setup skipped: key doesn't start with sk_ (got %s...)", key[:10] if key else "empty")
         return
     """Create Stripe Products and Prices for all paid plans and top-up packages.
 
