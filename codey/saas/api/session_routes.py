@@ -479,42 +479,94 @@ async def run_code(
             # Fall through to local subprocess
             pass
 
-    # Fallback: local subprocess (no package installation)
+    # Fallback: local subprocess with auto-fix on errors
     tmp_dir = Path(tempfile.mkdtemp(prefix="codey_run_"))
     tmp_file = tmp_dir / f"main.{ext}"
     tmp_file.write_text(body.code)
 
+    max_retries = 3
     timed_out = False
-    try:
-        proc = await _asyncio.create_subprocess_exec(
-            runner, str(tmp_file),
-            stdout=_asyncio.subprocess.PIPE,
-            stderr=_asyncio.subprocess.PIPE,
-            cwd=str(tmp_dir),
-        )
-        try:
-            stdout, stderr = await _asyncio.wait_for(proc.communicate(), timeout=30)
-        except _asyncio.TimeoutError:
-            proc.kill()
-            stdout, stderr = b"", b"Execution timed out (30s limit)"
-            timed_out = True
 
-        return RunCodeResponse(
-            stdout=(stdout or b"").decode("utf-8", errors="replace")[:10000],
-            stderr=(stderr or b"").decode("utf-8", errors="replace")[:5000],
-            exit_code=proc.returncode or 0,
-            timed_out=timed_out,
-        )
-    except Exception as e:
-        return RunCodeResponse(
-            stdout="",
-            stderr=f"Execution error: {str(e)[:200]}",
-            exit_code=-1,
-            timed_out=False,
-        )
-    finally:
-        import shutil
-        shutil.rmtree(tmp_dir, ignore_errors=True)
+    for attempt in range(max_retries):
+        try:
+            proc = await _asyncio.create_subprocess_exec(
+                runner, str(tmp_file),
+                stdout=_asyncio.subprocess.PIPE,
+                stderr=_asyncio.subprocess.PIPE,
+                cwd=str(tmp_dir),
+            )
+            try:
+                stdout, stderr = await _asyncio.wait_for(proc.communicate(), timeout=30)
+            except _asyncio.TimeoutError:
+                proc.kill()
+                stdout, stderr = b"", b"Execution timed out (30s limit)"
+                timed_out = True
+                break
+
+            stderr_str = (stderr or b"").decode("utf-8", errors="replace")
+            exit_code = proc.returncode or 0
+
+            # Auto-fix: missing module → pip install and retry
+            if exit_code != 0 and "ModuleNotFoundError: No module named" in stderr_str:
+                missing = _re.search(r"No module named '(\w+)'", stderr_str)
+                if missing and attempt < max_retries - 1:
+                    pkg = missing.group(1)
+                    # Map common module names to pip package names
+                    pkg_map = {"cv2": "opencv-python", "PIL": "Pillow", "sklearn": "scikit-learn",
+                               "bs4": "beautifulsoup4", "yaml": "pyyaml", "dotenv": "python-dotenv"}
+                    pip_pkg = pkg_map.get(pkg, pkg)
+                    install = await _asyncio.create_subprocess_exec(
+                        "pip", "install", "-q", pip_pkg,
+                        stdout=_asyncio.subprocess.PIPE,
+                        stderr=_asyncio.subprocess.PIPE,
+                    )
+                    await _asyncio.wait_for(install.communicate(), timeout=30)
+                    continue  # Retry execution
+
+            # Auto-fix: syntax error → ask LLM to fix and retry
+            if exit_code != 0 and ("SyntaxError" in stderr_str or "IndentationError" in stderr_str) and attempt < max_retries - 1:
+                try:
+                    from codey.saas.intelligence.providers import call_model, resolve_model
+                    provider, model = resolve_model("debugging")
+                    fix_result = await call_model(provider, model, [
+                        {"role": "system", "content": "Fix this Python code error. Return ONLY the corrected code, no explanation."},
+                        {"role": "user", "content": f"Error:\n{stderr_str[:500]}\n\nCode:\n{body.code}"},
+                    ], max_tokens=4096)
+                    # Extract code from response
+                    fixed = fix_result
+                    m = _re.search(r"```python\s*\n(.*?)```", fix_result, _re.DOTALL)
+                    if m:
+                        fixed = m.group(1)
+                    tmp_file.write_text(fixed)
+                    continue  # Retry with fixed code
+                except Exception:
+                    pass  # Can't fix, return the error
+
+            # Success or unfixable error
+            return RunCodeResponse(
+                stdout=(stdout or b"").decode("utf-8", errors="replace")[:10000],
+                stderr=stderr_str[:5000],
+                exit_code=exit_code,
+                timed_out=timed_out,
+            )
+
+        except Exception as e:
+            return RunCodeResponse(
+                stdout="",
+                stderr=f"Execution error: {str(e)[:200]}",
+                exit_code=-1,
+                timed_out=False,
+            )
+
+    # Exhausted retries — clean up and return last result
+    import shutil
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    return RunCodeResponse(
+        stdout=(stdout or b"").decode("utf-8", errors="replace")[:10000],
+        stderr=(stderr or b"").decode("utf-8", errors="replace")[:5000],
+        exit_code=proc.returncode or -1,
+        timed_out=timed_out,
+    )
 
 
 # ---------------------------------------------------------------------------
