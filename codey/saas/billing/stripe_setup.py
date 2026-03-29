@@ -9,12 +9,16 @@ from codey.saas.config import settings
 
 logger = logging.getLogger(__name__)
 
-stripe.api_key = settings.stripe_secret_key
-
 _METADATA_APP_KEY = "codey_entity"
 
 
 async def setup_stripe_products() -> None:
+    # Set API key at call time, not import time — ensures secret file is loaded
+    import os
+    stripe.api_key = os.environ.get("STRIPE_SECRET_KEY") or settings.stripe_secret_key
+    if not stripe.api_key or stripe.api_key.startswith("mk_"):
+        logger.warning("Stripe setup skipped: no valid API key")
+        return
     """Create Stripe Products and Prices for all paid plans and top-up packages.
 
     Safe to call multiple times — skips anything that already exists by checking
