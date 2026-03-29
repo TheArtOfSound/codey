@@ -438,10 +438,48 @@ async def run_code(
     """Execute code in an isolated sandbox and return the output."""
     import asyncio as _asyncio
 
+    import os as _os
+    import re as _re
+
     ext_map = {"python": ("py", "python3"), "javascript": ("js", "node")}
     ext, runner = ext_map.get(body.language, ("py", "python3"))
 
-    # Write code to temp file
+    # Try E2B cloud sandbox first (full VM with package managers)
+    e2b_key = _os.environ.get("E2B_API_KEY", "")
+    if e2b_key and body.language == "python":
+        try:
+            from e2b_code_interpreter import Sandbox
+            sbx = Sandbox(api_key=e2b_key, timeout=60)
+            try:
+                # Auto-detect imports and install missing packages
+                imports = _re.findall(r'^import\s+(\w+)|^from\s+(\w+)', body.code, _re.MULTILINE)
+                packages = set()
+                stdlib = {'os','sys','json','re','math','random','datetime','pathlib','typing',
+                         'collections','itertools','functools','io','string','time','hashlib',
+                         'uuid','logging','argparse','subprocess','tempfile','shutil','csv',
+                         'sqlite3','urllib','http','socket','threading','asyncio','abc','dataclasses',
+                         'enum','copy','pprint','textwrap','unittest','contextlib','operator'}
+                for imp in imports:
+                    pkg = imp[0] or imp[1]
+                    if pkg and pkg not in stdlib:
+                        packages.add(pkg)
+                if packages:
+                    sbx.commands.run(f"pip install -q {' '.join(packages)}", timeout=30)
+
+                result = sbx.commands.run(f"python3 -c '''{body.code}'''", timeout=30)
+                return RunCodeResponse(
+                    stdout=(result.stdout or "")[:10000],
+                    stderr=(result.stderr or "")[:5000],
+                    exit_code=result.exit_code,
+                    timed_out=False,
+                )
+            finally:
+                sbx.kill()
+        except Exception as e2b_err:
+            # Fall through to local subprocess
+            pass
+
+    # Fallback: local subprocess (no package installation)
     tmp_dir = Path(tempfile.mkdtemp(prefix="codey_run_"))
     tmp_file = tmp_dir / f"main.{ext}"
     tmp_file.write_text(body.code)
