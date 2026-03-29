@@ -1,23 +1,24 @@
 from __future__ import annotations
 
+# !! MUST run before any other imports that read env vars !!
+import os as _os
+from pathlib import Path as _Path
+_secret_env = _Path("/etc/secrets/.env")
+if _secret_env.exists():
+    for _line in _secret_env.read_text().splitlines():
+        _line = _line.strip()
+        if _line and "=" in _line and not _line.startswith("#"):
+            _k, _, _v = _line.partition("=")
+            _os.environ[_k.strip()] = _v.strip()
+# !! End secret file loading !!
+
 import os
 from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
-from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-
-# Load secret file env vars BEFORE importing settings
-# Render stores secret files at /etc/secrets/<filename>
-_secret_env = Path("/etc/secrets/.env")
-if _secret_env.exists():
-    for line in _secret_env.read_text().splitlines():
-        line = line.strip()
-        if line and "=" in line and not line.startswith("#"):
-            key, _, value = line.partition("=")
-            os.environ[key.strip()] = value.strip()
 
 from codey.saas.billing.stripe_setup import setup_stripe_products
 from codey.saas.config import settings
