@@ -436,35 +436,47 @@ async def run_code(
     current_user: User = Depends(get_current_user),
 ) -> RunCodeResponse:
     """Execute code in an isolated sandbox and return the output."""
-    # Create sandbox
-    sandbox = await _sandbox_manager.create(
-        user_id=str(current_user.id),
-        session_id="run-" + uuid.uuid4().hex[:8],
-        timeout=30,
-    )
+    import asyncio as _asyncio
 
+    ext_map = {"python": ("py", "python3"), "javascript": ("js", "node")}
+    ext, runner = ext_map.get(body.language, ("py", "python3"))
+
+    # Write code to temp file
+    tmp_dir = Path(tempfile.mkdtemp(prefix="codey_run_"))
+    tmp_file = tmp_dir / f"main.{ext}"
+    tmp_file.write_text(body.code)
+
+    timed_out = False
     try:
-        # Determine file extension and run command
-        ext_map = {"python": ("py", "python3"), "javascript": ("js", "node"), "typescript": ("ts", "npx ts-node"), "go": ("go", "go run"), "rust": ("rs", "rustc -o /tmp/out && /tmp/out")}
-        ext, runner = ext_map.get(body.language, ("py", "python3"))
-
-        filename = f"main.{ext}"
-        await _sandbox_manager.write_file(sandbox.id, filename, body.code)
-
-        # Run the code
-        if body.language == "rust":
-            result = await _sandbox_manager.execute(sandbox.id, f"rustc {filename} -o /tmp/out && /tmp/out", timeout=30)
-        else:
-            result = await _sandbox_manager.execute(sandbox.id, f"{runner} {filename}", timeout=30)
+        proc = await _asyncio.create_subprocess_exec(
+            runner, str(tmp_file),
+            stdout=_asyncio.subprocess.PIPE,
+            stderr=_asyncio.subprocess.PIPE,
+            cwd=str(tmp_dir),
+        )
+        try:
+            stdout, stderr = await _asyncio.wait_for(proc.communicate(), timeout=30)
+        except _asyncio.TimeoutError:
+            proc.kill()
+            stdout, stderr = b"", b"Execution timed out (30s limit)"
+            timed_out = True
 
         return RunCodeResponse(
-            stdout=result.stdout[:10000],
-            stderr=result.stderr[:5000],
-            exit_code=result.exit_code,
-            timed_out=result.timed_out,
+            stdout=(stdout or b"").decode("utf-8", errors="replace")[:10000],
+            stderr=(stderr or b"").decode("utf-8", errors="replace")[:5000],
+            exit_code=proc.returncode or 0,
+            timed_out=timed_out,
+        )
+    except Exception as e:
+        return RunCodeResponse(
+            stdout="",
+            stderr=f"Execution error: {str(e)[:200]}",
+            exit_code=-1,
+            timed_out=False,
         )
     finally:
-        await _sandbox_manager.destroy(sandbox.id)
+        import shutil
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
