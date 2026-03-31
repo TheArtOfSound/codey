@@ -153,8 +153,10 @@ async def create_prompt_session(
                     "- Return ONLY the code in a fenced code block, no explanations unless asked\n"
                     "- If generating requirements.txt or package.json, pin exact versions\n"
                     "- PREFER standard library modules over third-party packages when possible\n"
-                    "  (use curses not pygame for terminal games, use http.server not flask for simple servers,\n"
-                    "   use sqlite3 not sqlalchemy for simple DB, use unittest not pytest)\n"
+                    "- For GAMES, visual apps, or anything interactive: generate a SINGLE HTML file\n"
+                    "  with inline JavaScript and CSS that runs in a browser. NOT terminal/curses code.\n"
+                    "  Use canvas for graphics, requestAnimationFrame for game loops, addEventListener for input.\n"
+                    "- For NON-interactive scripts: prefer stdlib (sqlite3, http.server, unittest)\n"
                     "- If third-party packages ARE needed, list them in a comment at the top: # pip install X Y Z\n"
                 ),
             },
