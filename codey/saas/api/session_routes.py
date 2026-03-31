@@ -152,6 +152,10 @@ async def create_prompt_session(
                     "- Include error handling for external calls (API, DB, file I/O)\n"
                     "- Return ONLY the code in a fenced code block, no explanations unless asked\n"
                     "- If generating requirements.txt or package.json, pin exact versions\n"
+                    "- PREFER standard library modules over third-party packages when possible\n"
+                    "  (use curses not pygame for terminal games, use http.server not flask for simple servers,\n"
+                    "   use sqlite3 not sqlalchemy for simple DB, use unittest not pytest)\n"
+                    "- If third-party packages ARE needed, list them in a comment at the top: # pip install X Y Z\n"
                 ),
             },
             {"role": "user", "content": body.prompt},

@@ -517,13 +517,47 @@ function runCode(rawOutput, btn, codeBlock) {
         const label = result.timed_out ? 'Timed out' : (isError ? 'Error (exit ' + result.exit_code + ')' : 'Output');
         const content = (result.stdout || result.stderr || '(no output)').trim();
 
+        // If ModuleNotFoundError, show "Installing & retrying..." automatically
+        const stderr = (result.stderr || '').trim();
+        const isModuleError = stderr.includes('ModuleNotFoundError') || stderr.includes('No module named');
+
+        if (isModuleError && !btn._retried) {
+            btn._retried = true;
+            const modMatch = stderr.match(/No module named '(\w+)'/);
+            const modName = modMatch ? modMatch[1] : 'unknown';
+
+            output.innerHTML = `
+                <div style="margin-top: 8px; background: #0d1117; border: 1px solid #eab308; border-radius: 6px; padding: 12px;">
+                    <div style="font-size: 11px; font-weight: 600; color: #eab308; margin-bottom: 8px;">INSTALLING ${escapeHtml(modName.toUpperCase())} AND RETRYING...</div>
+                    <pre style="margin: 0; font-family: 'JetBrains Mono', monospace; font-size: 13px; color: #94a3b8;">Codey detected a missing package. Installing ${escapeHtml(modName)} and running again...</pre>
+                </div>
+            `;
+            codeBlock.parentElement.appendChild(output);
+
+            // Retry — the backend should auto-install and retry
+            setTimeout(() => runCode(rawOutput, btn, codeBlock), 2000);
+            return;
+        }
+        btn._retried = false;
+
         output.innerHTML = `
             <div style="margin-top: 8px; background: #0d1117; border: 1px solid ${borderColor}; border-radius: 6px; padding: 12px; position: relative;">
                 <div style="font-size: 11px; font-weight: 600; color: ${borderColor}; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em;">${label}</div>
                 <pre style="margin: 0; font-family: 'JetBrains Mono', monospace; font-size: 13px; color: #e6edf3; white-space: pre-wrap;">${escapeHtml(content)}</pre>
+                ${isError ? '<button id="fix-retry-btn" style="margin-top:8px;padding:6px 16px;border-radius:4px;border:1px solid #60a5fa;background:rgba(37,99,235,0.15);color:#60a5fa;font-size:12px;cursor:pointer;font-family:inherit;font-weight:600;">Fix & Retry</button>' : ''}
             </div>
         `;
         codeBlock.parentElement.appendChild(output);
+
+        // Wire Fix & Retry button
+        const fixBtn = output.querySelector('#fix-retry-btn');
+        if (fixBtn) {
+            fixBtn.onclick = function() {
+                output.remove();
+                btn._retried = false;
+                runCode(rawOutput, btn, codeBlock);
+            };
+        }
 
         btn.textContent = 'Run';
         btn.disabled = false;
