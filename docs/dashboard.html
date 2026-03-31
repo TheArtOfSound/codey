@@ -300,14 +300,17 @@ function handlePrompt() {
     if (!prompt) return;
 
     btn.disabled = true;
-    btn.textContent = 'Generating...';
+    btn.textContent = 'Connecting...';
 
-    fetch(API + '/sessions/prompt', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + token
-        },
+    // Wake backend first (Render free tier sleeps after 15min)
+    fetch(API + '/health').catch(() => {}).then(() => {
+        btn.textContent = 'Generating...';
+        return fetch(API + '/sessions/prompt', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + token
+            },
         body: JSON.stringify({ prompt })
     })
     .then(r => {
@@ -460,6 +463,7 @@ function handlePrompt() {
         btn.disabled = false;
         btn.textContent = 'Generate';
     });
+    }); // close health wake .then()
 }
 
 function updateEstimate() {
