@@ -25,6 +25,79 @@ const criticalDecoration = vscode.window.createTextEditorDecorationType({
   gutterIconSize: '80%',
 });
 
+// ── Inline Completion Provider (Tab Autocomplete) ────────────────────────────
+let lastCompletionRequest = 0;
+const DEBOUNCE_MS = 500;
+const completionCache = new Map<string, string>();
+
+class CodeyInlineCompletionProvider implements vscode.InlineCompletionItemProvider {
+  async provideInlineCompletionItems(
+    document: vscode.TextDocument,
+    position: vscode.Position,
+    context: vscode.InlineCompletionContext,
+    token: vscode.CancellationToken
+  ): Promise<vscode.InlineCompletionItem[] | undefined> {
+    // Debounce
+    const now = Date.now();
+    if (now - lastCompletionRequest < DEBOUNCE_MS) return undefined;
+    lastCompletionRequest = now;
+
+    // Only trigger after typing (not on explicit invoke for now)
+    const line = document.lineAt(position.line).text;
+    if (line.trim().length < 3) return undefined;
+
+    // Build context: surrounding code (±50 lines)
+    const startLine = Math.max(0, position.line - 50);
+    const endLine = Math.min(document.lineCount - 1, position.line + 20);
+    const prefix = document.getText(new vscode.Range(startLine, 0, position.line, position.character));
+    const suffix = document.getText(new vscode.Range(position.line, position.character, endLine, document.lineAt(endLine).text.length));
+
+    // Cache key
+    const cacheKey = `${document.uri.toString()}:${position.line}:${line.trim()}`;
+    if (completionCache.has(cacheKey)) {
+      const cached = completionCache.get(cacheKey)!;
+      return [new vscode.InlineCompletionItem(cached, new vscode.Range(position, position))];
+    }
+
+    const config = vscode.workspace.getConfiguration();
+    const apiUrl = config.get<string>(API_URL_KEY) || 'https://api-codey.autohustle.online';
+    const apiKey = config.get<string>(API_KEY_KEY) || '';
+    if (!apiKey) return undefined;
+
+    try {
+      const resp = await fetch(`${apiUrl}/sessions/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          prefix,
+          suffix,
+          language: document.languageId,
+          max_tokens: 150,
+        }),
+        signal: token.isCancellationRequested ? AbortSignal.abort() : undefined,
+      });
+
+      if (!resp.ok || token.isCancellationRequested) return undefined;
+
+      const data = await resp.json();
+      let completion = data.completion || '';
+
+      // Clean up — only take meaningful completion lines
+      completion = completion.trim();
+      if (!completion || completion.length < 2) return undefined;
+
+      // Cache it
+      completionCache.set(cacheKey, completion);
+      // Expire cache after 30s
+      setTimeout(() => completionCache.delete(cacheKey), 30_000);
+
+      return [new vscode.InlineCompletionItem(completion, new vscode.Range(position, position))];
+    } catch {
+      return undefined;
+    }
+  }
+}
+
 export function activate(context: vscode.ExtensionContext) {
   console.log('Codey extension activated');
 
@@ -36,10 +109,19 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('codey.showHealthPanel', showHealthPanel),
   );
 
+  // Register inline completion provider (Tab autocomplete)
+  const completionProvider = new CodeyInlineCompletionProvider();
+  context.subscriptions.push(
+    vscode.languages.registerInlineCompletionItemProvider(
+      { pattern: '**' }, // All file types
+      completionProvider
+    )
+  );
+
   // Status bar item showing health
   const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
   statusBar.text = '$(pulse) Codey';
-  statusBar.tooltip = 'Codey Structural Health';
+  statusBar.tooltip = 'Codey Structural Health — Tab for AI autocomplete';
   statusBar.command = 'codey.showHealthPanel';
   statusBar.show();
   context.subscriptions.push(statusBar);
