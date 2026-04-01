@@ -4,7 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Codey — The coding agent that understands your codebase</title>
-    <meta name="description" content="Codey analyzes your codebase as a living network. Every line it writes, it knows exactly where that line sits — and what breaking it would cost.">
+    <meta name="description" content="Codey — The AI coding agent that understands your entire codebase. Structural analysis, autonomous operation, and transparent pricing.">
+    <meta property="og:title" content="Codey — AI Coding Agent">
+    <meta property="og:description" content="The coding agent that understands your codebase. Full structural analysis, autonomous mode, overnight operation.">
+    <meta property="og:type" content="website">
+    <meta name="twitter:card" content="summary">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧠</text></svg>">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -489,14 +494,14 @@
         <div class="nav-center">
             <a href="#features">Features</a>
             <a href="#pricing">Pricing</a>
-            <a href="examples.html">Examples</a>
-            <a href="docs.html">API Docs</a>
-            <a href="help.html">Help</a>
-            <a href="changelog.html">Changelog</a>
+            <a href="#" data-coming-soon>Examples</a>
+            <a href="#" data-coming-soon>API Docs</a>
+            <a href="#" data-coming-soon>Help</a>
+            <a href="#" data-coming-soon>Changelog</a>
         </div>
         <div class="nav-right" id="nav-right">
-            <a href="login.html" class="nav-signin" id="nav-signin">Sign in</a>
-            <a href="signup.html" class="nav-cta" id="nav-cta">Start building — free</a>
+            <a href="#" data-coming-soon class="nav-signin" id="nav-signin">Sign in</a>
+            <a href="#" data-coming-soon class="nav-cta" id="nav-cta">Start building — free</a>
         </div>
     </div>
 </nav>
@@ -509,7 +514,7 @@
             <h1>Code that understands<br>what it's building.</h1>
             <p class="hero-sub">Codey analyzes your codebase as a living network. Every line it writes, it knows exactly where that line sits — and what breaking it would cost.</p>
             <div class="hero-ctas">
-                <a href="signup.html" class="btn-hero-primary">Start building — free</a>
+                <a href="#" data-coming-soon class="btn-hero-primary">Start building — free</a>
                 <a href="#features" class="btn-hero-ghost">See how it works &#8594;</a>
             </div>
             <div class="terminal-wrapper">
@@ -595,7 +600,7 @@
                     <li><span class="dash">&#8212;</span> Autonomous mode</li>
                     <li><span class="dash">&#8212;</span> API access</li>
                 </ul>
-                <a href="signup.html" class="btn-plan-secondary">Get started</a>
+                <button class="btn-plan-secondary" disabled style="opacity:0.5;cursor:not-allowed;">Coming Soon</button>
             </div>
             <!-- Starter -->
             <div class="price-card fade-up">
@@ -610,7 +615,7 @@
                     <li><span class="check">&#10003;</span> Email support</li>
                     <li><span class="dash">&#8212;</span> Autonomous mode</li>
                 </ul>
-                <a href="signup.html?plan=starter" class="btn-plan-secondary">Subscribe</a>
+                <button class="btn-plan-secondary" disabled style="opacity:0.5;cursor:not-allowed;">Coming Soon</button>
             </div>
             <!-- Pro -->
             <div class="price-card pro fade-up">
@@ -626,7 +631,7 @@
                     <li><span class="check">&#10003;</span> Priority processing</li>
                     <li><span class="check">&#10003;</span> API access</li>
                 </ul>
-                <a href="signup.html?plan=pro" class="btn-plan-primary">Subscribe</a>
+                <button class="btn-plan-primary" disabled style="opacity:0.5;cursor:not-allowed;">Coming Soon</button>
             </div>
             <!-- Team -->
             <div class="price-card fade-up">
@@ -641,7 +646,7 @@
                     <li><span class="check">&#10003;</span> Priority support</li>
                     <li><span class="check">&#10003;</span> Custom integrations</li>
                 </ul>
-                <a href="signup.html?plan=team" class="btn-plan-secondary">Subscribe</a>
+                <button class="btn-plan-secondary" disabled style="opacity:0.5;cursor:not-allowed;">Coming Soon</button>
             </div>
         </div>
     </div>
@@ -690,21 +695,21 @@
                 <h4>Product</h4>
                 <a href="#features">Features</a>
                 <a href="#pricing">Pricing</a>
-                <a href="examples.html">Examples</a>
-            <a href="docs.html">API Docs</a>
-            <a href="help.html">Help</a>
-                <a href="changelog.html">Changelog</a>
+                <a href="#" data-coming-soon>Examples</a>
+                <a href="#" data-coming-soon>API Docs</a>
+                <a href="#" data-coming-soon>Help</a>
+                <a href="#" data-coming-soon>Changelog</a>
             </div>
             <div class="footer-col">
                 <h4>Company</h4>
-                <a href="/about">About</a>
-                <a href="changelog.html">Blog</a>
+                <a href="#" data-coming-soon>About</a>
+                <a href="#" data-coming-soon>Blog</a>
                 <a href="mailto:bryan@qira.ai">Contact</a>
             </div>
             <div class="footer-col">
                 <h4>Legal</h4>
-                <a href="terms.html">Terms</a>
-                <a href="privacy.html">Privacy</a>
+                <a href="#" data-coming-soon>Terms</a>
+                <a href="#" data-coming-soon>Privacy</a>
             </div>
             <div class="footer-col">
                 <h4>Social</h4>
@@ -746,14 +751,14 @@
         let name = 'User';
         try { const u = JSON.parse(userStr); name = u.name || u.email || 'User'; } catch(e) {}
         const navRight = document.getElementById('nav-right');
-        navRight.innerHTML = '<a href="dashboard.html" class="nav-cta">Dashboard</a>';
+        navRight.innerHTML = '<a href="#" data-coming-soon class="nav-cta">Dashboard</a>';
     }
 
     // Cookie consent — minimal bottom bar, not content-blocking
     if (!localStorage.getItem('codey_cookies_accepted')) {
         const banner = document.createElement('div');
         banner.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#0a1628;border-top:1px solid #1e3a5f;padding:12px 24px;display:flex;align-items:center;justify-content:space-between;z-index:200;font-size:13px;color:#94a3b8;';
-        banner.innerHTML = 'We use essential cookies only. No tracking. <div style="display:flex;gap:8px;align-items:center;"><a href="privacy.html" style="color:#60a5fa;font-size:12px;">Privacy Policy</a><button onclick="localStorage.setItem(\'codey_cookies_accepted\',\'1\');this.closest(\'div\').parentElement.remove();" style="padding:6px 16px;border-radius:4px;border:none;background:#2563eb;color:white;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;">Accept</button></div>';
+        banner.innerHTML = 'We use essential cookies only. No tracking. <div style="display:flex;gap:8px;align-items:center;"><a href="#" data-coming-soon style="color:#60a5fa;font-size:12px;">Privacy Policy</a><button onclick="localStorage.setItem(\'codey_cookies_accepted\',\'1\');this.closest(\'div\').parentElement.remove();" style="padding:6px 16px;border-radius:4px;border:none;background:#2563eb;color:white;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;">Accept</button></div>';
         document.body.appendChild(banner);
     }
 </script>
