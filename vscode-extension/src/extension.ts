@@ -194,9 +194,10 @@ async function askAboutFile() {
 }
 
 async function generateCode() {
+  const editor = vscode.window.activeTextEditor;
   const prompt = await vscode.window.showInputBox({
-    prompt: 'What do you want Codey to generate?',
-    placeHolder: 'Build a REST API endpoint for user authentication with JWT',
+    prompt: 'What do you want Codey to generate or change?',
+    placeHolder: 'Add error handling / Refactor this function / Build a REST endpoint',
   });
 
   if (!prompt) return;
@@ -204,16 +205,61 @@ async function generateCode() {
   vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: 'Codey: Generating...' },
     async () => {
-      const result = await callApi('/sessions/prompt', { prompt });
+      // If there's an active editor with code, send it as context for inline editing
+      const currentCode = editor ? editor.document.getText() : '';
+      const language = editor ? editor.document.languageId : 'python';
+
+      const result = await callApi('/sessions/prompt', {
+        prompt: currentCode
+          ? `${prompt}\n\nHere is the current code:\n\`\`\`${language}\n${currentCode.substring(0, 15000)}\n\`\`\`\n\nReturn the COMPLETE updated code.`
+          : prompt,
+        language,
+      });
 
       if (result?.output) {
-        const editor = vscode.window.activeTextEditor;
-        if (editor) {
-          editor.edit(editBuilder => {
-            editBuilder.insert(editor.selection.active, result.output);
+        let newCode = result.output;
+        // Strip markdown fences
+        const fenceMatch = newCode.match(/```(?:\w+)?\n([\s\S]*?)```/);
+        if (fenceMatch) newCode = fenceMatch[1];
+
+        if (editor && currentCode) {
+          // Show inline diff — open a diff view comparing original to proposed changes
+          const originalUri = editor.document.uri;
+          const proposedDoc = await vscode.workspace.openTextDocument({
+            content: newCode.trim(),
+            language,
           });
+
+          // Show diff editor
+          await vscode.commands.executeCommand('vscode.diff',
+            originalUri,
+            proposedDoc.uri,
+            `Codey: ${prompt.substring(0, 40)}... (Review changes)`,
+            { preview: true }
+          );
+
+          // Ask user to accept or reject
+          const action = await vscode.window.showInformationMessage(
+            `Codey generated ${(newCode.match(/\n/g) || []).length + 1} lines. Apply changes?`,
+            'Accept All',
+            'Reject'
+          );
+
+          if (action === 'Accept All') {
+            const fullRange = new vscode.Range(
+              editor.document.positionAt(0),
+              editor.document.positionAt(currentCode.length)
+            );
+            await editor.edit(editBuilder => {
+              editBuilder.replace(fullRange, newCode.trim());
+            });
+            vscode.window.showInformationMessage('Codey: Changes applied');
+          } else {
+            vscode.window.showInformationMessage('Codey: Changes rejected');
+          }
         } else {
-          const doc = await vscode.workspace.openTextDocument({ content: result.output });
+          // No active file — open the generated code in a new document
+          const doc = await vscode.workspace.openTextDocument({ content: newCode, language });
           vscode.window.showTextDocument(doc);
         }
 
