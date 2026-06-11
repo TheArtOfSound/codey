@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
+from codey.saas.billing.plans import PLANS
+from codey.saas.tasks.asyncio_utils import run_sync_task
 from codey.saas.tasks.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -10,14 +12,32 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Plan credit limits (mirrored from billing config)
 # ---------------------------------------------------------------------------
+def _coerce_plan_credit_limit(value: object) -> int:
+    if isinstance(value, bool):
+        return 0
+    try:
+        credits = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+    return credits if credits > 0 else 0
+
+
 PLAN_MONTHLY_CREDITS: dict[str, int] = {
-    "free": 10,
-    "starter": 100,
-    "pro": 500,
-    "team": 2000,
+    plan: _coerce_plan_credit_limit(config.get("credits", 0))
+    for plan, config in PLANS.items()
 }
 
 GRACE_PERIOD_DAYS = 7
+
+
+def _coerce_rowcount(value: object) -> int:
+    if isinstance(value, bool):
+        return 0
+    try:
+        rowcount = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+    return rowcount if rowcount > 0 else 0
 
 
 @celery_app.task(
@@ -29,8 +49,6 @@ def reset_monthly_credits(self) -> dict:
 
     Runs daily but only performs resets when ``day == 1``.
     """
-    import asyncio
-
     now = datetime.utcnow()
     if now.day != 1:
         return {"status": "skipped", "reason": "not first of month"}
@@ -40,19 +58,6 @@ def reset_monthly_credits(self) -> dict:
         from sqlalchemy import text
 
         async with async_session_factory() as db:
-            result = await db.execute(
-                text(
-                    "UPDATE users "
-                    "SET credits_remaining = :credits, credits_used_this_month = 0 "
-                    "WHERE plan = :plan AND plan_status = 'active'"
-                ),
-                [
-                    {"credits": credits, "plan": plan}
-                    for plan, credits in PLAN_MONTHLY_CREDITS.items()
-                ],
-            )
-
-            # Batch update — one statement per plan for clarity
             total_updated = 0
             for plan, credits in PLAN_MONTHLY_CREDITS.items():
                 res = await db.execute(
@@ -64,13 +69,13 @@ def reset_monthly_credits(self) -> dict:
                     ),
                     {"credits": credits, "plan": plan},
                 )
-                total_updated += res.rowcount  # type: ignore[union-attr]
+                total_updated += _coerce_rowcount(res.rowcount)
 
             await db.commit()
             logger.info("Monthly credit reset: updated %d users", total_updated)
             return {"status": "completed", "users_updated": total_updated}
 
-    return asyncio.get_event_loop().run_until_complete(_reset())
+    return run_sync_task(_reset())
 
 
 @celery_app.task(
@@ -79,11 +84,11 @@ def reset_monthly_credits(self) -> dict:
 )
 def check_grace_period(self) -> dict:
     """Downgrade users whose subscription lapsed beyond the grace period."""
-    import asyncio
-
     async def _check() -> dict:
         from codey.saas.database import async_session_factory
         from sqlalchemy import text
+
+        grace_cutoff = datetime.utcnow() - timedelta(days=GRACE_PERIOD_DAYS)
 
         async with async_session_factory() as db:
             result = await db.execute(
@@ -93,18 +98,18 @@ def check_grace_period(self) -> dict:
                     "    plan_status = 'expired', "
                     "    credits_remaining = LEAST(credits_remaining, :free_credits) "
                     "WHERE plan_status = 'past_due' "
-                    "AND subscription_period_end < now() - INTERVAL ':days days'"
+                    "AND subscription_period_end < :grace_cutoff"
                 ),
                 {
                     "free_credits": PLAN_MONTHLY_CREDITS["free"],
-                    "days": GRACE_PERIOD_DAYS,
+                    "grace_cutoff": grace_cutoff,
                 },
             )
-            downgraded = result.rowcount  # type: ignore[union-attr]
+            downgraded = _coerce_rowcount(result.rowcount)
             await db.commit()
 
             if downgraded:
                 logger.info("Grace period expired: downgraded %d users", downgraded)
             return {"status": "completed", "downgraded": downgraded}
 
-    return asyncio.get_event_loop().run_until_complete(_check())
+    return run_sync_task(_check())

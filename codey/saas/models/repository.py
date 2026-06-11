@@ -43,4 +43,8 @@ class Repository(Base):
     )
 
     # Relationships
-    user: Mapped["User"] = relationship("User", back_populates="repositories")
+    user: Mapped["User"] = relationship(
+        "User",
+        back_populates="repositories",
+        lazy="selectin",
+    )

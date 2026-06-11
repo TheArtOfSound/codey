@@ -91,6 +91,8 @@ services:
       DATABASE_URL: postgresql+asyncpg://codey:${POSTGRES_PASSWORD:-codey_dev}@postgres:5432/codey
       REDIS_URL: redis://redis:6379/0
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
 
@@ -101,11 +103,14 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY:-}
     restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
-      NEXT_PUBLIC_API_URL: http://backend:8000
+      NEXT_PUBLIC_API_URL: /api/proxy
+      NEXT_SERVER_API_URL: http://backend:8000
     depends_on:
       - backend
 

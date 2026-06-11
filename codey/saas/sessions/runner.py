@@ -5,8 +5,10 @@ from __future__ import annotations
 import logging
 import tempfile
 import traceback
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from sqlalchemy import select
@@ -14,14 +16,104 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from codey.graph.engine import CodebaseGraph
 from codey.llm.code_agent import CodeAgent
+from codey.nfet.repository_loader import (
+    CLONE_TIMEOUT_SECONDS,
+    _build_authenticated_clone_url,
+    _clone_error_text,
+    _git_clone_env,
+    _terminate_timed_out_clone,
+)
 from codey.llm.prompt_builder import PromptBuilder
+from codey.nfet.controller import NFETController
 from codey.nfet.sweep import NFETSweep, SweepResult
 from codey.parser.extractor import LanguageParser, parse_directory
+from codey.saas.build_mode.path_utils import normalize_plan_file_path
 from codey.saas.credits.service import CREDIT_COSTS, CreditService, InsufficientCreditsError
 from codey.saas.models import CodingSession, Repository
 from codey.saas.sessions.stream import SessionStream
 
 logger = logging.getLogger(__name__)
+SESSION_FAILURE_ERROR_LIMIT = 1000
+_ALLOWED_REPOSITORY_CLONE_SCHEMES = {"git", "git+ssh", "http", "https", "ssh"}
+_ALLOWED_REPOSITORY_SCP_CLONE_HOSTS = {"github.com", "www.github.com"}
+
+
+def _session_failure_error_text(exc: Exception) -> str:
+    return (
+        f"{type(exc).__name__}: {_clone_error_text(str(exc), '')}"
+    )[:SESSION_FAILURE_ERROR_LIMIT]
+
+
+def _has_ascii_control(value: str) -> bool:
+    return any(ord(char) < 32 or ord(char) == 127 for char in value)
+
+
+def _has_whitespace(value: str) -> bool:
+    return any(char.isspace() for char in value)
+
+
+def _coerce_github_clone_token(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    token = value.strip()
+    if not token or _has_ascii_control(token) or _has_whitespace(token):
+        return None
+    return token
+
+
+def _coerce_repository_clone_url(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    clone_url = value.strip()
+    if (
+        not clone_url
+        or _has_ascii_control(clone_url)
+        or _has_whitespace(clone_url)
+    ):
+        return None
+    if "?" in clone_url or "#" in clone_url:
+        return None
+    if "://" not in clone_url:
+        user_host, separator, path = clone_url.partition(":")
+        user, _, host = user_host.partition("@")
+        if (
+            separator != ":"
+            or not path
+            or user.lower() != "git"
+            or host.lower() not in _ALLOWED_REPOSITORY_SCP_CLONE_HOSTS
+        ):
+            return None
+    else:
+        try:
+            split = urlsplit(clone_url)
+            port = split.port
+        except ValueError:
+            return None
+        scheme = split.scheme.lower()
+        if scheme not in _ALLOWED_REPOSITORY_CLONE_SCHEMES:
+            return None
+        if port is not None and port <= 0:
+            return None
+        if split.hostname is None:
+            return None
+        if scheme in {"http", "https"} and (
+            split.username is not None or split.password is not None
+        ):
+            return None
+        if split.password is not None:
+            return None
+        if split.username is not None and (
+            scheme not in {"git+ssh", "ssh"} or split.username.lower() != "git"
+        ):
+            return None
+    return clone_url
+
+
+def _coerce_runner_uuid(value: object) -> UUID | None:
+    try:
+        return UUID(str(value))
+    except (TypeError, ValueError):
+        return None
 
 
 class SessionRunner:
@@ -64,14 +156,21 @@ class SessionRunner:
         On any error the session is marked failed, credits are refunded, and
         the error is streamed to connected clients.
         """
-        sid = UUID(session_id)
-        uid = UUID(user_id)
+        sid = _coerce_runner_uuid(session_id)
+        uid = _coerce_runner_uuid(user_id)
+        if sid is None or uid is None:
+            logger.warning("Skipping prompt session with malformed identifiers")
+            await self._send(session_id, {
+                "type": "error",
+                "message": "ValueError: Invalid session or user ID",
+            })
+            return
         credit_svc = CreditService(db)
         reserved_credits = 0
 
         try:
             # ----- 1. Mark session as running -----
-            session = await self._get_session(db, sid)
+            session = await self._get_session(db, sid, uid)
             session.status = "running"
             await db.flush()
 
@@ -80,13 +179,14 @@ class SessionRunner:
             # ----- 2. Build codebase graph -----
             graph = CodebaseGraph()
             sweep = NFETSweep()
+            controller = NFETController(sweep_engine=sweep)
 
             if repo_id:
                 await self._send(session_id, {
                     "type": "status",
                     "message": "Analyzing codebase structure...",
                 })
-                repo = await self._get_repository(db, UUID(repo_id))
+                repo = await self._get_repository(db, UUID(repo_id), uid)
                 nodes, edges = await self._parse_repository(repo)
                 graph.build_from_nodes_edges(nodes, edges)
                 sweep.calibrate(graph)
@@ -111,12 +211,33 @@ class SessionRunner:
                 session.nfet_phase_before = before_result.phase.value
                 session.es_score_before = before_result.es_score
 
+                repo_state = controller.analyze(graph, goal=prompt)
+                candidates = controller.rank_interventions(
+                    graph,
+                    goal=prompt,
+                    repo_state=repo_state,
+                    limit=3,
+                )
+                await self._send(session_id, {
+                    "type": "nfet_hotspots",
+                    "hotspots": [hotspot.to_dict() for hotspot in repo_state.hotspots],
+                })
+                await self._send(session_id, {
+                    "type": "nfet_candidates",
+                    "candidates": [candidate.to_dict() for candidate in candidates],
+                })
+
             # ----- 4. Build structural prompt + plan -----
             if graph.node_count > 0:
                 builder = PromptBuilder(graph, sweep)
                 plan_result = sweep.run(graph)
                 context = builder.build_context(plan_result)
-                plan_steps = self._derive_plan_steps(prompt, language, context)
+                guidance = controller.build_guidance(repo_state, candidates)
+                plan_steps = self._derive_plan_steps(
+                    prompt,
+                    language,
+                    f"{context}\n\n{guidance}",
+                )
             else:
                 plan_steps = self._derive_plan_steps(prompt, language, None)
 
@@ -131,10 +252,10 @@ class SessionRunner:
             agent = CodeAgent(graph, sweep) if graph.node_count > 0 else CodeAgent(
                 CodebaseGraph(), NFETSweep()
             )
-            result = agent.generate_code(prompt)
+            result = self._coerce_generated_result(agent.generate_code(prompt))
 
-            code = result.get("code", "")
-            explanation = result.get("explanation", "")
+            code = self._coerce_generated_text(result.get("code", ""))
+            explanation = self._coerce_generated_text(result.get("explanation", ""))
 
             # Stream code chunks -- split by file if the output contains
             # multiple file markers, otherwise send as a single chunk.
@@ -158,7 +279,7 @@ class SessionRunner:
                 parser = LanguageParser()
                 for file_path, file_content in files_generated.items():
                     with tempfile.NamedTemporaryFile(
-                        suffix=Path(file_path).suffix or ".py",
+                        suffix=self._generated_temp_suffix(file_path, language),
                         mode="w",
                         delete=False,
                     ) as tmp:
@@ -193,21 +314,14 @@ class SessionRunner:
             # Cap at the estimated cost to be user-friendly
             charged = min(actual_cost, estimated_cost)
 
-            try:
-                tx = await credit_svc.reserve_credits(
-                    uid, charged, f"Session {session_id}: {total_lines} lines generated", sid
-                )
-                reserved_credits = charged
-            except InsufficientCreditsError:
-                # If they can't afford it, charge what they have
-                balance = await credit_svc.get_balance(uid)
-                available = balance["total"]
-                if available > 0:
-                    tx = await credit_svc.reserve_credits(
-                        uid, available, f"Session {session_id}: partial charge", sid
-                    )
-                    reserved_credits = available
-                # Still deliver the results -- the code was already generated
+            reserved_credits = await self._reserve_prompt_credits(
+                credit_svc,
+                uid,
+                sid,
+                session_id,
+                charged,
+                total_lines,
+            )
 
             # ----- 8. Persist results -----
             files_modified = len(files_generated)
@@ -228,7 +342,11 @@ class SessionRunner:
             })
 
         except Exception as exc:
-            logger.exception("Session %s failed: %s", session_id, exc)
+            logger.warning(
+                "Session %s failed: %s",
+                session_id,
+                _session_failure_error_text(exc),
+            )
             await self._handle_failure(
                 db, sid, uid, reserved_credits, credit_svc, session_id, exc
             )
@@ -254,13 +372,20 @@ class SessionRunner:
         4. Identify top stress components and send recommendations.
         5. Persist results to the CodingSession record.
         """
-        sid = UUID(session_id)
-        uid = UUID(user_id)
+        sid = _coerce_runner_uuid(session_id)
+        uid = _coerce_runner_uuid(user_id)
+        if sid is None or uid is None:
+            logger.warning("Skipping analysis session with malformed identifiers")
+            await self._send(session_id, {
+                "type": "error",
+                "message": "ValueError: Invalid session or user ID",
+            })
+            return
         credit_svc = CreditService(db)
         reserved_credits = 0
 
         try:
-            session = await self._get_session(db, sid)
+            session = await self._get_session(db, sid, uid)
             session.status = "running"
             await db.flush()
 
@@ -299,6 +424,14 @@ class SessionRunner:
             sweep = NFETSweep()
             sweep.calibrate(graph)
             result = sweep.run(graph)
+            controller = NFETController(sweep_engine=sweep)
+            repo_state = controller.analyze(graph, goal="analysis session")
+            candidates = controller.rank_interventions(
+                graph,
+                goal="analysis session",
+                repo_state=repo_state,
+                limit=5,
+            )
 
             await self._send(session_id, {
                 "type": "nfet_scan",
@@ -317,24 +450,11 @@ class SessionRunner:
 
             # ----- 4. Top stress components + recommendations -----
             recommendations: list[str] = []
-            for comp_id, stress_val in result.top_stress_components[:5]:
-                comp_data = graph._graph.nodes.get(comp_id)
-                name = comp_data.get("name", comp_id) if comp_data else comp_id
-                file_path = comp_data.get("file_path", "") if comp_data else ""
-                coupling = graph.coupling_score(comp_id)
-                cascade = graph.cascade_depth(comp_id)
-
-                rec = (
-                    f"{name} ({file_path}): stress={stress_val:.2f}, "
-                    f"coupling={coupling:.1f}, cascade_depth={cascade}. "
+            for candidate in candidates:
+                recommendations.append(
+                    f"{candidate.title}: delta_ES={candidate.predicted_repo_es_delta:.3f}, "
+                    f"target={candidate.target_file_path}. {candidate.description}"
                 )
-                if stress_val > 0.7:
-                    rec += "HIGH RISK -- consider extracting shared logic to reduce coupling."
-                elif stress_val > 0.4:
-                    rec += "Moderate risk -- monitor for coupling growth."
-                else:
-                    rec += "Healthy range."
-                recommendations.append(rec)
 
             if recommendations:
                 await self._send(session_id, {
@@ -371,7 +491,11 @@ class SessionRunner:
             })
 
         except Exception as exc:
-            logger.exception("Analysis session %s failed: %s", session_id, exc)
+            logger.warning(
+                "Analysis session %s failed: %s",
+                session_id,
+                _session_failure_error_text(exc),
+            )
             await self._handle_failure(
                 db, sid, uid, reserved_credits, credit_svc, session_id, exc
             )
@@ -387,20 +511,36 @@ class SessionRunner:
         except Exception:
             logger.debug("Failed to send WS message for session %s", session_id)
 
-    async def _get_session(self, db: AsyncSession, session_id: UUID) -> CodingSession:
+    async def _get_session(
+        self,
+        db: AsyncSession,
+        session_id: UUID,
+        user_id: UUID,
+    ) -> CodingSession:
         """Load a CodingSession row or raise."""
         result = await db.execute(
-            select(CodingSession).where(CodingSession.id == session_id)
+            select(CodingSession).where(
+                CodingSession.id == session_id,
+                CodingSession.user_id == user_id,
+            )
         )
         session = result.scalar_one_or_none()
         if session is None:
             raise ValueError(f"CodingSession {session_id} not found")
         return session
 
-    async def _get_repository(self, db: AsyncSession, repo_id: UUID) -> Repository:
+    async def _get_repository(
+        self,
+        db: AsyncSession,
+        repo_id: UUID,
+        user_id: UUID,
+    ) -> Repository:
         """Load a Repository row or raise."""
         result = await db.execute(
-            select(Repository).where(Repository.id == repo_id)
+            select(Repository).where(
+                Repository.id == repo_id,
+                Repository.user_id == user_id,
+            )
         )
         repo = result.scalar_one_or_none()
         if repo is None:
@@ -414,9 +554,16 @@ class SessionRunner:
 
         Returns (nodes, edges) suitable for ``CodebaseGraph.build_from_nodes_edges``.
         """
-        clone_url = repo.clone_url
-        if not clone_url:
+        clone_url = _coerce_repository_clone_url(getattr(repo, "clone_url", None))
+        if clone_url is None:
             raise ValueError(f"Repository {repo.id} has no clone_url")
+        github_token = _coerce_github_clone_token(
+            getattr(getattr(repo, "user", None), "github_token", None)
+        )
+        auth_clone_url = _build_authenticated_clone_url(
+            clone_url,
+            github_token,
+        )
 
         # Clone into a temp directory
         import asyncio
@@ -424,15 +571,45 @@ class SessionRunner:
 
         tmp_dir = Path(tempfile.mkdtemp(prefix="codey_repo_"))
         try:
-            proc = await asyncio.create_subprocess_exec(
-                "git", "clone", "--depth", "1", clone_url, str(tmp_dir / "repo"),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await proc.communicate()
-            if proc.returncode != 0:
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "git",
+                    "clone",
+                    "--depth",
+                    "1",
+                    "--",
+                    auth_clone_url,
+                    str(tmp_dir / "repo"),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    env=_git_clone_env(),
+                )
+            except FileNotFoundError as exc:
                 raise RuntimeError(
-                    f"git clone failed (exit {proc.returncode}): {stderr.decode()}"
+                    "git executable not found; install git to clone repositories"
+                ) from exc
+            except OSError as exc:
+                raise RuntimeError(
+                    f"failed to start git clone: {_clone_error_text(str(exc), '')}"
+                ) from exc
+            try:
+                _stdout, stderr = await asyncio.wait_for(
+                    proc.communicate(),
+                    timeout=CLONE_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError as exc:
+                await _terminate_timed_out_clone(proc)
+                raise RuntimeError(
+                    f"git clone timed out after {CLONE_TIMEOUT_SECONDS}s"
+                ) from exc
+
+            if proc.returncode != 0:
+                stderr_text = stderr.decode("utf-8", errors="replace").strip()
+                stdout_text = (_stdout or b"").decode("utf-8", errors="replace").strip()
+                raise RuntimeError(
+                    "git clone failed "
+                    f"(exit {proc.returncode}): "
+                    f"{_clone_error_text(stderr_text, stdout_text)}"
                 )
 
             repo_path = tmp_dir / "repo"
@@ -452,12 +629,21 @@ class SessionRunner:
         exc: Exception,
     ) -> None:
         """Mark a session as failed, refund credits, and stream the error."""
-        error_msg = f"{type(exc).__name__}: {exc}"
+        error_msg = _session_failure_error_text(exc)
 
         try:
-            session = await self._get_session(db, session_id)
+            await db.rollback()
+        except Exception as rollback_exc:
+            logger.warning(
+                "Failed to rollback failed session transaction for %s: %s",
+                session_id,
+                _session_failure_error_text(rollback_exc),
+            )
+
+        try:
+            session = await self._get_session(db, session_id, user_id)
             session.status = "failed"
-            session.error_message = error_msg[:1000]
+            session.error_message = error_msg
             session.completed_at = datetime.utcnow()
 
             if reserved_credits > 0:
@@ -474,13 +660,121 @@ class SessionRunner:
             logger.error(
                 "Failed to persist failure state for session %s: %s",
                 session_id,
-                inner,
+                _session_failure_error_text(inner),
             )
 
         await self._send(ws_session_id, {
             "type": "error",
             "message": error_msg,
         })
+
+    async def _reserve_prompt_credits(
+        self,
+        credit_svc: CreditService,
+        user_id: UUID,
+        session_id: UUID,
+        ws_session_id: str,
+        charged: int,
+        total_lines: int,
+    ) -> int:
+        """Reserve prompt-session credits without failing already-generated output."""
+        if charged <= 0:
+            return 0
+
+        try:
+            await credit_svc.reserve_credits(
+                user_id,
+                charged,
+                f"Session {ws_session_id}: {total_lines} lines generated",
+                session_id,
+            )
+            return charged
+        except InsufficientCreditsError:
+            balance = await credit_svc.get_balance(user_id)
+            available = self._coerce_available_credits(balance)
+            if available <= 0:
+                return 0
+            try:
+                await credit_svc.reserve_credits(
+                    user_id,
+                    available,
+                    f"Session {ws_session_id}: partial charge",
+                    session_id,
+                )
+            except InsufficientCreditsError:
+                logger.warning(
+                    "Prompt session %s partial credit charge raced with another spend",
+                    ws_session_id,
+                )
+                return 0
+            return available
+
+    @staticmethod
+    def _coerce_available_credits(balance: object) -> int:
+        if not isinstance(balance, dict):
+            return 0
+        value = balance.get("total")
+        if isinstance(value, bool):
+            return 0
+        try:
+            available = int(value)
+        except (TypeError, ValueError, OverflowError):
+            return 0
+        return available if available > 0 else 0
+
+    @staticmethod
+    def _coerce_generated_text(value: object) -> str:
+        return value if isinstance(value, str) else ""
+
+    @staticmethod
+    def _coerce_generated_result(value: object) -> Mapping[str, object]:
+        return value if isinstance(value, Mapping) else {}
+
+    @staticmethod
+    def _generated_temp_suffix(file_path: str, language: str | None) -> str:
+        ext_map = {
+            "python": ".py",
+            "javascript": ".js",
+            "typescript": ".ts",
+            "jsx": ".jsx",
+            "tsx": ".tsx",
+        }
+        fallback = ext_map.get((language or "").lower(), ".py")
+        try:
+            suffix = Path(file_path).suffix
+        except (TypeError, ValueError):
+            return fallback
+        if (
+            not suffix
+            or any(ord(char) < 32 or ord(char) == 127 for char in suffix)
+        ):
+            return fallback
+        return suffix
+
+    @staticmethod
+    def _default_generated_file_path(language: str | None, index: int = 1) -> str:
+        ext_map = {
+            "python": ".py",
+            "javascript": ".js",
+            "typescript": ".ts",
+            "jsx": ".jsx",
+            "tsx": ".tsx",
+        }
+        ext = ext_map.get((language or "").lower(), ".py")
+        stem = "generated" if index <= 1 else f"generated_{index}"
+        return f"{stem}{ext}"
+
+    @staticmethod
+    def _unique_generated_file_path(
+        language: str | None,
+        existing: Mapping[str, str],
+    ) -> str:
+        index = 1
+        while True:
+            candidate = SessionRunner._default_generated_file_path(language, index)
+            if candidate not in existing:
+                return candidate
+            index += 1
 
     @staticmethod
     def _count_lines(code: str) -> int:
@@ -561,23 +855,22 @@ class SessionRunner:
         markers = list(marker_re.finditer(code))
         if markers:
             for i, match in enumerate(markers):
-                file_path = match.group(1).strip()
+                file_path = normalize_plan_file_path(match.group(1))
+                if file_path is None:
+                    file_path = SessionRunner._unique_generated_file_path(language, files)
                 start = match.end()
                 end = markers[i + 1].start() if i + 1 < len(markers) else len(code)
                 content = code[start:end].strip()
                 if content:
-                    files[file_path] = content
+                    existing = files.get(file_path)
+                    files[file_path] = (
+                        f"{existing}\n\n{content}" if existing else content
+                    )
         else:
             # Single file output
-            ext_map = {
-                "python": ".py",
-                "javascript": ".js",
-                "typescript": ".ts",
-                "jsx": ".jsx",
-                "tsx": ".tsx",
-            }
-            ext = ext_map.get((language or "").lower(), ".py")
-            files[f"generated{ext}"] = code.strip() if code else ""
+            files[SessionRunner._default_generated_file_path(language)] = (
+                code.strip() if code else ""
+            )
 
         return files
 

@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 from typing import Any
 
-import anthropic
-
+from codey.saas.build_mode.path_utils import normalize_plan_file_path
 from codey.saas.build_mode.templates import TemplateLibrary
 
 logger = logging.getLogger(__name__)
@@ -32,6 +30,91 @@ _CREDITS_PER_FILE: dict[str, float] = {
     "static": 0.2,
     "style": 0.5,
 }
+
+
+def _coerce_json_mapping(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _coerce_planner_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return ""
+
+
+def _coerce_file_tree(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    file_tree: dict[str, str] = {}
+    for path, file_type in value.items():
+        normalized_path = normalize_plan_file_path(path)
+        if normalized_path is None:
+            continue
+        file_tree[normalized_path] = file_type if isinstance(file_type, str) else ""
+    return file_tree
+
+
+def _coerce_phase_files(value: Any) -> list[str]:
+    if isinstance(value, str):
+        candidate = normalize_plan_file_path(value)
+        return [candidate] if candidate is not None else []
+    if not isinstance(value, list):
+        return []
+    files: list[str] = []
+    for raw in value:
+        candidate = normalize_plan_file_path(raw)
+        if candidate is not None:
+            files.append(candidate)
+    return files
+
+
+def _coerce_questions(value: Any) -> list[str]:
+    if isinstance(value, str):
+        candidate = value.strip()
+        return [candidate] if candidate else []
+    if not isinstance(value, list):
+        return []
+    questions: list[str] = []
+    for raw in value:
+        if not isinstance(raw, str):
+            continue
+        candidate = raw.strip()
+        if candidate:
+            questions.append(candidate)
+    return questions
+
+
+def _coerce_defaults(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    defaults: dict[str, str] = {}
+    for key, raw_default in value.items():
+        if not isinstance(key, str) or not isinstance(raw_default, str):
+            continue
+        normalized_key = key.strip()
+        normalized_default = raw_default.strip()
+        if normalized_key and normalized_default:
+            defaults[normalized_key] = normalized_default
+    return defaults
+
+
+def _coerce_phases(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    phases: list[dict[str, Any]] = []
+    for index, raw_phase in enumerate(value, start=1):
+        if not isinstance(raw_phase, dict):
+            continue
+        phase = dict(raw_phase)
+        phase["name"] = phase.get("name") if isinstance(phase.get("name"), str) else f"Phase {index}"
+        phase["description"] = (
+            phase.get("description") if isinstance(phase.get("description"), str) else ""
+        )
+        phase["files"] = _coerce_phase_files(phase.get("files"))
+        phases.append(phase)
+    return phases
 
 
 class ProjectPlanner:
@@ -88,19 +171,24 @@ class ProjectPlanner:
             "If the description is already very detailed, return fewer or no questions."
         )
 
-        response = await client.messages.create(
-            model="claude-sonnet-4-20250514",
+        raw = await call_model(
+            provider,
+            model,
+            [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_description},
+            ],
             max_tokens=2048,
-            system=system,
-            messages=[{"role": "user", "content": user_description}],
         )
-
-        raw = raw_response
 
         parsed = self._extract_json(raw)
 
-        questions = parsed.get("questions", [])[:5]
-        defaults = parsed.get("defaults", {})
+        questions = _coerce_questions(parsed.get("questions"))[:5]
+        defaults = {
+            question: default
+            for question, default in _coerce_defaults(parsed.get("defaults")).items()
+            if question in questions
+        }
 
         return {
             "questions": questions,
@@ -187,14 +275,15 @@ class ProjectPlanner:
             "- Return ONLY the JSON object, no markdown, no explanation"
         )
 
-        response = await client.messages.create(
-            model="claude-sonnet-4-20250514",
+        raw = await call_model(
+            provider,
+            model,
+            [
+                {"role": "system", "content": system},
+                {"role": "user", "content": context},
+            ],
             max_tokens=8192,
-            system=system,
-            messages=[{"role": "user", "content": context}],
         )
-
-        raw = raw_response
 
         plan = self._extract_json(raw)
 
@@ -231,14 +320,14 @@ class ProjectPlanner:
         # Ensure required keys exist
         plan.setdefault("name", "Untitled Project")
         plan.setdefault("description", "")
-        plan.setdefault("stack", {})
-        plan.setdefault("file_tree", {})
-        plan.setdefault("phases", [])
+        plan["stack"] = _coerce_json_mapping(plan.get("stack"))
+        plan["file_tree"] = _coerce_file_tree(plan.get("file_tree"))
+        plan["phases"] = _coerce_phases(plan.get("phases"))
 
         # Ensure every file in phases is in file_tree
         all_phase_files: set[str] = set()
         for phase in plan["phases"]:
-            for fp in phase.get("files", []):
+            for fp in phase["files"]:
                 all_phase_files.add(fp)
                 if fp not in plan["file_tree"]:
                     plan["file_tree"][fp] = "service"  # default type
@@ -261,6 +350,7 @@ class ProjectPlanner:
 
     def _estimate_credits(self, file_tree: dict[str, str]) -> dict[str, Any]:
         """Calculate credit cost range from the file tree."""
+        file_tree = _coerce_file_tree(file_tree)
         if not file_tree:
             return {"min": 0, "max": 0, "breakdown": {}}
 
@@ -329,7 +419,7 @@ class ProjectPlanner:
         """Match a description to a template."""
         return self._templates.match_template(description)
 
-    def _extract_json(self, text: str) -> dict[str, Any]:
+    def _extract_json(self, text: Any) -> dict[str, Any]:
         """Extract a JSON object from LLM response text.
 
         Handles:
@@ -337,10 +427,16 @@ class ProjectPlanner:
         - JSON in code blocks
         - JSON with surrounding prose
         """
+        if isinstance(text, dict):
+            return _coerce_json_mapping(text)
+
         # Try direct parse
-        text = text.strip()
+        text = _coerce_planner_text(text).strip()
+        if not text:
+            return {}
         try:
-            return json.loads(text)
+            parsed = json.loads(text)
+            return _coerce_json_mapping(parsed)
         except json.JSONDecodeError:
             pass
 
@@ -348,7 +444,8 @@ class ProjectPlanner:
         code_block = re.search(r"```(?:json)?\s*\n(.*?)```", text, re.DOTALL)
         if code_block:
             try:
-                return json.loads(code_block.group(1).strip())
+                parsed = json.loads(code_block.group(1).strip())
+                return _coerce_json_mapping(parsed)
             except json.JSONDecodeError:
                 pass
 
@@ -359,7 +456,8 @@ class ProjectPlanner:
         if first_brace != -1 and last_brace > first_brace:
             candidate = text[first_brace : last_brace + 1]
             try:
-                return json.loads(candidate)
+                parsed = json.loads(candidate)
+                return _coerce_json_mapping(parsed)
             except json.JSONDecodeError:
                 pass
 

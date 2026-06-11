@@ -9,11 +9,177 @@ from pathlib import Path
 from typing import Any
 
 
-def _safe_round(val: float, digits: int = 4) -> float:
-    """Round a float, replacing inf/nan with 0."""
-    if math.isnan(val) or math.isinf(val):
+def _safe_round(val: Any, digits: int = 4) -> float:
+    """Round a numeric value, replacing malformed/inf/nan values with 0."""
+    if isinstance(val, bool):
         return 0.0
-    return round(val, digits)
+    try:
+        metric = float(val)
+    except OverflowError:
+        return 0.0
+    except (TypeError, ValueError):
+        return 0.0
+    if math.isnan(metric) or math.isinf(metric):
+        return 0.0
+    return round(metric, digits)
+
+
+def _safe_float(val: Any) -> float:
+    """Return a finite numeric value, replacing malformed/inf/nan values with 0."""
+    if isinstance(val, bool):
+        return 0.0
+    try:
+        metric = float(val)
+    except (OverflowError, TypeError, ValueError):
+        return 0.0
+    return metric if math.isfinite(metric) else 0.0
+
+
+def _safe_bool(val: Any) -> bool:
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, (int, float)) and not isinstance(val, bool):
+        try:
+            metric = float(val)
+        except (OverflowError, TypeError, ValueError):
+            return False
+        return math.isfinite(metric) and metric != 0.0
+    if isinstance(val, bytes):
+        val = val.decode("utf-8", errors="replace")
+    if isinstance(val, str):
+        normalized = val.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"", "0", "false", "no", "off"}:
+            return False
+    return False
+
+
+def _dashboard_text(val: Any) -> str:
+    if val is None:
+        return ""
+    if isinstance(val, bytes):
+        return val.decode("utf-8", errors="replace")
+    return val if isinstance(val, str) else str(val)
+
+
+def _format_history_record(record: Any) -> dict[str, Any]:
+    if not isinstance(record, dict):
+        record = {}
+    return {
+        "timestamp": _dashboard_text(record.get("timestamp", "")),
+        "es_score": _safe_round(record.get("es_score", 0), 4),
+        "kappa": _safe_round(record.get("kappa", 0), 4),
+        "sigma": _safe_round(record.get("sigma", 0), 4),
+        "phase": _dashboard_text(record.get("phase", "")),
+    }
+
+
+def _format_change_record(record: Any) -> dict[str, Any]:
+    if not isinstance(record, dict):
+        record = {}
+    return {
+        "timestamp": _dashboard_text(record.get("timestamp", "")),
+        "trigger": _dashboard_text(record.get("trigger_condition", "")),
+        "component": _dashboard_text(record.get("component_affected", "")),
+        "stress_before": _safe_float(record.get("stress_before", 0)),
+        "stress_after": _safe_float(record.get("stress_after", 0)),
+        "es_before": _safe_float(record.get("es_before", 0)),
+        "es_after": _safe_float(record.get("es_after", 0)),
+        "rolled_back": _safe_bool(record.get("rolled_back", 0)),
+    }
+
+
+def _safe_top_stress_components(
+    value: Any, limit: int | None = None
+) -> list[tuple[str, float]]:
+    if not isinstance(value, (list, tuple)):
+        return []
+
+    components: list[tuple[str, float]] = []
+    for item in value:
+        if isinstance(item, dict):
+            component_id = item.get("id") or item.get("component") or item.get("name")
+            stress_value = item.get("stress")
+        elif isinstance(item, (list, tuple)) and len(item) >= 2:
+            component_id = item[0]
+            stress_value = item[1]
+        else:
+            continue
+
+        if not isinstance(component_id, str) or not component_id:
+            continue
+
+        components.append((component_id, _safe_round(stress_value)))
+        if limit is not None and len(components) >= limit:
+            break
+
+    return components
+
+
+def _normalize_dashboard_stress(value: Any, scale: float = 10.0) -> float:
+    try:
+        raw = float(value)
+    except (OverflowError, TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(raw):
+        return 1.0 if raw > 0 else 0.0
+    try:
+        scale = float(scale)
+    except (OverflowError, TypeError, ValueError):
+        scale = 10.0
+    if not math.isfinite(scale) or scale <= 0:
+        scale = 10.0
+    return raw / (raw + scale) if raw > 0 else 0.0
+
+
+def _dashboard_json_safe(value: Any, _seen: set[int] | None = None) -> Any:
+    if value is None or isinstance(value, (bool, int, str)):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else 0.0
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if _seen is None:
+        _seen = set()
+    if isinstance(value, dict):
+        value_id = id(value)
+        if value_id in _seen:
+            return "[Circular]"
+        _seen.add(value_id)
+        try:
+            return {
+                str(key): _dashboard_json_safe(item, _seen)
+                for key, item in value.items()
+            }
+        finally:
+            _seen.remove(value_id)
+    if isinstance(value, (set, frozenset)):
+        value_id = id(value)
+        if value_id in _seen:
+            return "[Circular]"
+        _seen.add(value_id)
+        try:
+            return [
+                _dashboard_json_safe(item, _seen)
+                for item in sorted(
+                    value,
+                    key=lambda item: (type(item).__name__, repr(item)),
+                )
+            ]
+        finally:
+            _seen.remove(value_id)
+    if isinstance(value, (list, tuple)):
+        value_id = id(value)
+        if value_id in _seen:
+            return "[Circular]"
+        _seen.add(value_id)
+        try:
+            return [_dashboard_json_safe(item, _seen) for item in value]
+        finally:
+            _seen.remove(value_id)
+    return str(value)
+
 
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -43,9 +209,9 @@ class DashboardState:
         self.connected_clients: set = set()
 
     async def broadcast(self, data: dict) -> None:
-        payload = json.dumps(data)
+        payload = json.dumps(_dashboard_json_safe(data), allow_nan=False)
         stale = []
-        for ws in self.connected_clients:
+        for ws in list(self.connected_clients):
             try:
                 await ws.send_text(payload)
             except Exception:
@@ -60,7 +226,7 @@ def create_app(state: DashboardState) -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     async def index():
-        return (STATIC_DIR / "index.html").read_text()
+        return (STATIC_DIR / "index.html").read_text(encoding="utf-8")
 
     @app.get("/api/status")
     async def api_status():
@@ -70,9 +236,9 @@ def create_app(state: DashboardState) -> FastAPI:
         graph: CodebaseGraph = state.graph
         return {
             "phase": sweep.phase.name,
-            "kappa": round(sweep.kappa, 4),
-            "sigma": round(sweep.sigma, 4),
-            "es_score": round(sweep.es_score, 4),
+            "kappa": _safe_round(sweep.kappa, 4),
+            "sigma": _safe_round(sweep.sigma, 4),
+            "es_score": _safe_round(sweep.es_score, 4),
             "node_count": graph.node_count if graph else 0,
             "edge_count": graph.edge_count if graph else 0,
         }
@@ -85,7 +251,9 @@ def create_app(state: DashboardState) -> FastAPI:
             return {"components": []}
 
         components = []
-        for comp_id, stress_val in sweep.top_stress_components:
+        for comp_id, stress_val in _safe_top_stress_components(
+            sweep.top_stress_components
+        ):
             node_data = graph._graph.nodes.get(comp_id, {})
             name = node_data.get("name", comp_id[:12])
             fp = node_data.get("file_path", "")
@@ -105,7 +273,7 @@ def create_app(state: DashboardState) -> FastAPI:
         all_stress = graph.get_high_stress_components(threshold=0.3)
         seen = {c["id"] for c in components}
         for comp_id, raw_stress in all_stress:
-            stress_val = raw_stress / (raw_stress + _STRESS_SCALE) if raw_stress > 0 else 0.0
+            stress_val = _normalize_dashboard_stress(raw_stress, _STRESS_SCALE)
             if comp_id in seen:
                 continue
             if len(components) >= 10:
@@ -133,13 +301,7 @@ def create_app(state: DashboardState) -> FastAPI:
         records = state.health_db.get_history(hours=hours)
         return {
             "history": [
-                {
-                    "timestamp": r.get("timestamp", ""),
-                    "es_score": round(r.get("es_score", 0), 4),
-                    "kappa": round(r.get("kappa", 0), 4),
-                    "sigma": round(r.get("sigma", 0), 4),
-                    "phase": r.get("phase", ""),
-                }
+                _format_history_record(r)
                 for r in records
             ]
         }
@@ -151,16 +313,7 @@ def create_app(state: DashboardState) -> FastAPI:
         records = state.audit_db.get_recent(limit=limit)
         return {
             "changes": [
-                {
-                    "timestamp": r.get("timestamp", ""),
-                    "trigger": r.get("trigger_condition", ""),
-                    "component": r.get("component_affected", ""),
-                    "stress_before": r.get("stress_before", 0),
-                    "stress_after": r.get("stress_after", 0),
-                    "es_before": r.get("es_before", 0),
-                    "es_after": r.get("es_after", 0),
-                    "rolled_back": bool(r.get("rolled_back", 0)),
-                }
+                _format_change_record(r)
                 for r in records
             ]
         }
@@ -188,7 +341,7 @@ def create_app(state: DashboardState) -> FastAPI:
             "coupling": _safe_round(graph.coupling_score(fp), 4),
             "cohesion": _safe_round(graph.cohesion_score(fp), 4),
             "cascade_depth": graph.cascade_depth(component_id),
-            "betweenness": round(betweenness, 4),
+            "betweenness": _safe_round(betweenness, 4),
             "impact_radius": len(graph.impact_radius(component_id)),
             "dependencies": [{"id": s, "name": graph._graph.nodes.get(s, {}).get("name", s)} for s in successors[:20]],
             "dependents": [{"id": p, "name": graph._graph.nodes.get(p, {}).get("name", p)} for p in predecessors[:20]],

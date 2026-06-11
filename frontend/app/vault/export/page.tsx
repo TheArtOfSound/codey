@@ -68,6 +68,7 @@ export default function ExportCenterPage() {
   const [projects, setProjects] = useState<ExportProject[]>([]);
   const [history, setHistory] = useState<ExportHistoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Export form state
   const [selectedProject, setSelectedProject] = useState<string>("");
@@ -88,32 +89,9 @@ export default function ExportCenterPage() {
         ]);
         setProjects(projData);
         setHistory(histData);
-      } catch {
-        setProjects([
-          { id: "1", name: "codey-frontend", language: "TypeScript" },
-          { id: "2", name: "api-service", language: "Python" },
-          { id: "3", name: "structural-analyzer", language: "Rust" },
-        ]);
-        setHistory([
-          {
-            id: "e1",
-            project_name: "codey-frontend",
-            export_type: "download",
-            status: "completed",
-            created_at: new Date(Date.now() - 86400_000).toISOString(),
-            download_url: "#",
-            destination: "codey-frontend-v3.zip",
-          },
-          {
-            id: "e2",
-            project_name: "api-service",
-            export_type: "github",
-            status: "completed",
-            created_at: new Date(Date.now() - 172800_000).toISOString(),
-            download_url: null,
-            destination: "user/api-service (main)",
-          },
-        ]);
+      } catch (err) {
+        console.error("Failed to load export center:", err);
+        setLoadError("Failed to load export data.");
       } finally {
         setLoading(false);
       }
@@ -159,6 +137,15 @@ export default function ExportCenterPage() {
     return (
       <div className="flex h-64 items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin text-codey-green" />
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="mx-auto max-w-4xl rounded-xl border border-codey-red/30 bg-codey-card p-6">
+        <h1 className="text-2xl font-bold text-codey-text">Export Center</h1>
+        <p className="mt-2 text-sm text-codey-red">{loadError}</p>
       </div>
     );
   }

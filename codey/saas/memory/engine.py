@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import uuid
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
@@ -73,13 +75,23 @@ class MemoryEngine:
             raise ValueError(f"Session {session_id} not found")
 
         memory = await _get_or_create_memory(user_id, db)
+        memory_version = _coerce_memory_int(
+            getattr(memory, "memory_version", None), 0
+        )
+        total_sessions = _coerce_memory_int(
+            getattr(memory, "total_sessions_analyzed", None), 0
+        )
 
-        prompt_text = (session.prompt or "").lower()
-        output_text = (session.output_summary or "").lower()
+        prompt = getattr(session, "prompt", None)
+        output_summary = getattr(session, "output_summary", None)
+        prompt_text = prompt.lower() if isinstance(prompt, str) else ""
+        output_text = (
+            output_summary.lower() if isinstance(output_summary, str) else ""
+        )
         combined = f"{prompt_text} {output_text}"
 
         # --- Style extraction ---
-        style: dict[str, Any] = dict(memory.style_model)
+        style = _coerce_memory_mapping(getattr(memory, "style_model", None))
         for label, keywords in _STYLE_SIGNALS.items():
             hits = sum(1 for kw in keywords if kw in combined)
             if hits > 0:
@@ -89,7 +101,9 @@ class MemoryEngine:
         memory.style_model = style
 
         # --- Communication style ---
-        comm: dict[str, Any] = dict(memory.communication_style)
+        comm = _coerce_memory_mapping(
+            getattr(memory, "communication_style", None)
+        )
         if any(w in combined for w in ["don't explain", "no comments", "just code"]):
             comm["prefers_code_only"] = True
         if any(w in combined for w in ["explain", "walk me through", "why"]):
@@ -99,7 +113,9 @@ class MemoryEngine:
         memory.communication_style = comm
 
         # --- Structural preferences ---
-        structural: dict[str, Any] = dict(memory.structural_preferences)
+        structural = _coerce_memory_mapping(
+            getattr(memory, "structural_preferences", None)
+        )
         if "tabs" in combined and "spaces" not in combined:
             structural["indentation"] = "tabs"
         elif "spaces" in combined and "tabs" not in combined:
@@ -113,7 +129,7 @@ class MemoryEngine:
         memory.structural_preferences = structural
 
         # --- Project knowledge ---
-        project: dict[str, Any] = dict(memory.project_knowledge)
+        project = _coerce_memory_mapping(getattr(memory, "project_knowledge", None))
         detected_langs = [lang for lang in _LANGUAGE_KEYWORDS if lang in combined]
         detected_fw = [fw for fw in _FRAMEWORK_KEYWORDS if fw in combined]
         if detected_langs:
@@ -127,49 +143,60 @@ class MemoryEngine:
         memory.project_knowledge = project
 
         # --- Skill profile ---
-        skill: dict[str, Any] = dict(memory.skill_profile)
-        if session.mode:
-            mode_counts: dict[str, int] = skill.get("mode_usage", {})
-            mode_counts[session.mode] = mode_counts.get(session.mode, 0) + 1
+        skill = _coerce_memory_mapping(getattr(memory, "skill_profile", None))
+        session_mode = getattr(session, "mode", None)
+        if isinstance(session_mode, str) and session_mode:
+            mode_counts = _coerce_memory_mapping(skill.get("mode_usage"))
+            mode_counts[session_mode] = (
+                _coerce_memory_int(mode_counts.get(session_mode), 0) + 1
+            )
             skill["mode_usage"] = mode_counts
-        if session.lines_generated and session.lines_generated > 0:
-            total_lines = skill.get("total_lines_generated", 0)
-            skill["total_lines_generated"] = total_lines + session.lines_generated
+        lines_generated = _coerce_memory_int(
+            getattr(session, "lines_generated", None), 0
+        )
+        if lines_generated > 0:
+            total_lines = _coerce_memory_int(skill.get("total_lines_generated"), 0)
+            skill["total_lines_generated"] = total_lines + lines_generated
         memory.skill_profile = skill
 
         # --- Work patterns ---
-        patterns: dict[str, Any] = dict(memory.work_patterns)
-        if session.started_at:
-            hour = session.started_at.hour
+        patterns = _coerce_memory_mapping(getattr(memory, "work_patterns", None))
+        started_at = getattr(session, "started_at", None)
+        completed_at = getattr(session, "completed_at", None)
+        if isinstance(started_at, datetime):
+            hour = started_at.hour
             hour_bucket = "morning" if 5 <= hour < 12 else (
                 "afternoon" if 12 <= hour < 17 else (
                     "evening" if 17 <= hour < 21 else "night"
                 )
             )
-            time_dist: dict[str, int] = patterns.get("time_distribution", {})
-            time_dist[hour_bucket] = time_dist.get(hour_bucket, 0) + 1
+            time_dist = _coerce_memory_mapping(patterns.get("time_distribution"))
+            time_dist[hour_bucket] = (
+                _coerce_memory_int(time_dist.get(hour_bucket), 0) + 1
+            )
             patterns["time_distribution"] = time_dist
 
-        if session.started_at and session.completed_at:
-            duration_min = (session.completed_at - session.started_at).total_seconds() / 60
-            avg = patterns.get("avg_session_minutes", 0.0)
-            count = memory.total_sessions_analyzed or 0
-            if count > 0:
+        if isinstance(started_at, datetime) and isinstance(completed_at, datetime):
+            duration_min = (completed_at - started_at).total_seconds() / 60
+            avg = _coerce_memory_float(patterns.get("avg_session_minutes"), 0.0)
+            if total_sessions > 0:
                 patterns["avg_session_minutes"] = round(
-                    (avg * count + duration_min) / (count + 1), 1
+                    (avg * total_sessions + duration_min) / (total_sessions + 1), 1
                 )
             else:
                 patterns["avg_session_minutes"] = round(duration_min, 1)
         memory.work_patterns = patterns
 
         # --- Explicit preferences (from "always" / "never" statements) ---
-        explicit: list[Any] = list(memory.explicit_preferences)
+        explicit = _coerce_memory_list(
+            getattr(memory, "explicit_preferences", None)
+        )
         _extract_explicit_preferences(combined, explicit)
         memory.explicit_preferences = explicit
 
         # --- Finalize ---
-        memory.memory_version += 1
-        memory.total_sessions_analyzed = (memory.total_sessions_analyzed or 0) + 1
+        memory.memory_version = memory_version + 1
+        memory.total_sessions_analyzed = total_sessions + 1
         memory.last_updated = datetime.utcnow()
 
         # Log the update
@@ -209,29 +236,42 @@ class MemoryEngine:
         sections.append("## WHAT YOU KNOW ABOUT THIS USER\n")
 
         # Style
-        if memory.style_model:
+        style_model = _coerce_memory_mapping(getattr(memory, "style_model", None))
+        if style_model:
             dominant = sorted(
-                memory.style_model.items(), key=lambda x: x[1], reverse=True
+                (
+                    (key, float(value))
+                    for key, value in style_model.items()
+                    if isinstance(value, (int, float)) and not isinstance(value, bool)
+                ),
+                key=lambda x: x[1],
+                reverse=True,
             )
             top_styles = [f"{k} ({v:.0%})" for k, v in dominant[:3] if v > 0.1]
             if top_styles:
                 sections.append(f"**Style tendencies:** {', '.join(top_styles)}")
 
         # Communication
-        if memory.communication_style:
+        communication_style = _coerce_memory_mapping(
+            getattr(memory, "communication_style", None)
+        )
+        if communication_style:
             comm_notes: list[str] = []
-            if memory.communication_style.get("prefers_code_only"):
+            if communication_style.get("prefers_code_only"):
                 comm_notes.append("prefers code without lengthy explanations")
-            if memory.communication_style.get("prefers_explanations"):
+            if communication_style.get("prefers_explanations"):
                 comm_notes.append("appreciates detailed explanations")
-            if memory.communication_style.get("prefers_incremental"):
+            if communication_style.get("prefers_incremental"):
                 comm_notes.append("likes step-by-step walkthroughs")
             if comm_notes:
                 sections.append(f"**Communication:** {'; '.join(comm_notes)}")
 
         # Structural
-        if memory.structural_preferences:
-            sp = memory.structural_preferences
+        structural_preferences = _coerce_memory_mapping(
+            getattr(memory, "structural_preferences", None)
+        )
+        if structural_preferences:
+            sp = structural_preferences
             prefs: list[str] = []
             if "indentation" in sp:
                 prefs.append(f"uses {sp['indentation']}")
@@ -243,41 +283,70 @@ class MemoryEngine:
                 sections.append(f"**Code style:** {', '.join(prefs)}")
 
         # Project knowledge
-        if memory.project_knowledge:
-            pk = memory.project_knowledge
+        project_knowledge = _coerce_memory_mapping(
+            getattr(memory, "project_knowledge", None)
+        )
+        if project_knowledge:
+            pk = project_knowledge
             if pk.get("languages"):
                 sections.append(f"**Languages:** {', '.join(pk['languages'])}")
             if pk.get("frameworks"):
                 sections.append(f"**Frameworks:** {', '.join(pk['frameworks'])}")
 
         # Work patterns
-        if memory.work_patterns:
-            wp = memory.work_patterns
-            if wp.get("time_distribution"):
-                peak = max(wp["time_distribution"], key=wp["time_distribution"].get)
+        work_patterns = _coerce_memory_mapping(getattr(memory, "work_patterns", None))
+        if work_patterns:
+            wp = work_patterns
+            time_distribution = {
+                key: _coerce_memory_float(value, 0.0)
+                for key, value in _coerce_memory_mapping(
+                    wp.get("time_distribution")
+                ).items()
+                if isinstance(key, str)
+                and key
+                and _coerce_memory_float(value, 0.0) > 0.0
+            }
+            if time_distribution:
+                peak = max(time_distribution, key=time_distribution.get)
                 sections.append(f"**Peak working time:** {peak}")
-            if wp.get("avg_session_minutes"):
+            avg_session_minutes = _coerce_memory_float(
+                wp.get("avg_session_minutes"), 0.0
+            )
+            if avg_session_minutes > 0.0:
                 sections.append(
-                    f"**Avg session length:** {wp['avg_session_minutes']:.0f} min"
+                    f"**Avg session length:** {avg_session_minutes:.0f} min"
                 )
 
         # Explicit preferences
-        if memory.explicit_preferences:
-            prefs_list = memory.explicit_preferences[:10]
+        explicit_preferences = _coerce_memory_list(
+            getattr(memory, "explicit_preferences", None)
+        )
+        if explicit_preferences:
+            prefs_list = explicit_preferences[:10]
             formatted = "\n".join(f"  - {p}" for p in prefs_list)
             sections.append(f"**Explicit preferences:**\n{formatted}")
 
         # Skill profile
-        if memory.skill_profile and memory.skill_profile.get("mode_usage"):
-            modes = memory.skill_profile["mode_usage"]
+        skill_profile = _coerce_memory_mapping(getattr(memory, "skill_profile", None))
+        modes = {
+            key: _coerce_memory_int(value, 0)
+            for key, value in _coerce_memory_mapping(
+                skill_profile.get("mode_usage")
+            ).items()
+            if isinstance(key, str) and key and _coerce_memory_int(value, 0) > 0
+        }
+        if modes:
             mode_str = ", ".join(f"{k}: {v}" for k, v in sorted(
                 modes.items(), key=lambda x: x[1], reverse=True
             )[:3])
             sections.append(f"**Favorite modes:** {mode_str}")
 
-        if memory.total_sessions_analyzed:
+        total_sessions = _coerce_memory_int(
+            getattr(memory, "total_sessions_analyzed", None), 0
+        )
+        if total_sessions > 0:
             sections.append(
-                f"\n_Based on {memory.total_sessions_analyzed} sessions analyzed._"
+                f"\n_Based on {total_sessions} sessions analyzed._"
             )
 
         return "\n".join(sections)
@@ -305,10 +374,13 @@ class MemoryEngine:
         insights: list[dict[str, Any]] = []
 
         # --- Stress trend detection ---
-        wp = memory.work_patterns or {}
-        time_dist = wp.get("time_distribution", {})
-        night_count = time_dist.get("night", 0)
-        total_sessions = memory.total_sessions_analyzed or 1
+        wp = _coerce_memory_mapping(getattr(memory, "work_patterns", None))
+        time_dist = _coerce_memory_mapping(wp.get("time_distribution"))
+        night_count = _coerce_memory_int(time_dist.get("night"), 0)
+        total_sessions = max(
+            _coerce_memory_int(getattr(memory, "total_sessions_analyzed", None), 0),
+            1,
+        )
         night_ratio = night_count / total_sessions
 
         if night_ratio > 0.4 and total_sessions >= 5:
@@ -323,7 +395,7 @@ class MemoryEngine:
             })
 
         # --- Session length trend ---
-        avg_min = wp.get("avg_session_minutes", 0)
+        avg_min = _coerce_memory_float(wp.get("avg_session_minutes"), 0.0)
         if avg_min > 120:
             insights.append({
                 "type": "session_length",
@@ -343,10 +415,15 @@ class MemoryEngine:
             .order_by(CodingSession.started_at.desc())
             .limit(20)
         )
-        recent_errors = result.scalars().all()
+        recent_errors = _coerce_memory_row_list(result.scalars().all())
 
         if len(recent_errors) >= 5:
-            error_messages = [s.error_message for s in recent_errors if s.error_message]
+            error_messages = [
+                message
+                for session in recent_errors
+                if isinstance((message := getattr(session, "error_message", None)), str)
+                and message
+            ]
             # Simple duplicate detection via first 50 chars
             prefixes = [m[:50] for m in error_messages]
             from collections import Counter
@@ -363,8 +440,8 @@ class MemoryEngine:
                 })
 
         # --- Mode diversity check ---
-        skill = memory.skill_profile or {}
-        mode_usage = skill.get("mode_usage", {})
+        skill = _coerce_memory_mapping(getattr(memory, "skill_profile", None))
+        mode_usage = _coerce_memory_mapping(skill.get("mode_usage"))
         if len(mode_usage) == 1 and total_sessions >= 10:
             only_mode = list(mode_usage.keys())[0]
             insights.append({
@@ -397,10 +474,12 @@ class MemoryEngine:
     ) -> UserMemory:
         """User manually adds a preference to their memory."""
         memory = await _get_or_create_memory(user_id, db)
-        prefs = list(memory.explicit_preferences)
+        prefs = _coerce_memory_list(getattr(memory, "explicit_preferences", None))
         prefs.append(preference.strip())
         memory.explicit_preferences = prefs
-        memory.memory_version += 1
+        memory.memory_version = (
+            _coerce_memory_int(getattr(memory, "memory_version", None), 0) + 1
+        )
         memory.last_updated = datetime.utcnow()
 
         log_entry = MemoryUpdateLog(
@@ -425,7 +504,7 @@ class MemoryEngine:
         if memory is None:
             raise ValueError(f"No memory found for user {user_id}")
 
-        prefs = list(memory.explicit_preferences)
+        prefs = _coerce_memory_list(getattr(memory, "explicit_preferences", None))
         if index < 0 or index >= len(prefs):
             raise IndexError(
                 f"Preference index {index} out of range (0-{len(prefs) - 1})"
@@ -433,7 +512,9 @@ class MemoryEngine:
 
         removed = prefs.pop(index)
         memory.explicit_preferences = prefs
-        memory.memory_version += 1
+        memory.memory_version = (
+            _coerce_memory_int(getattr(memory, "memory_version", None), 0) + 1
+        )
         memory.last_updated = datetime.utcnow()
 
         log_entry = MemoryUpdateLog(
@@ -454,7 +535,7 @@ class MemoryEngine:
         if memory is None:
             raise ValueError(f"No memory found for user {user_id}")
 
-        old_version = memory.memory_version
+        old_version = _coerce_memory_int(getattr(memory, "memory_version", None), 0)
 
         memory.style_model = {}
         memory.work_patterns = {}
@@ -482,6 +563,17 @@ class MemoryEngine:
         return memory
 
     @staticmethod
+    def _serialize_memory_timestamp(value: object) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        return str(value)
+
+    @staticmethod
     async def export_memory(
         user_id: uuid.UUID,
         db: AsyncSession,
@@ -492,18 +584,38 @@ class MemoryEngine:
             return {"error": "No memory found", "user_id": str(user_id)}
 
         return {
-            "user_id": str(memory.user_id),
-            "style_model": memory.style_model,
-            "work_patterns": memory.work_patterns,
-            "project_knowledge": memory.project_knowledge,
-            "communication_style": memory.communication_style,
-            "structural_preferences": memory.structural_preferences,
-            "skill_profile": memory.skill_profile,
-            "explicit_preferences": memory.explicit_preferences,
-            "proactive_queue": memory.proactive_queue,
-            "memory_version": memory.memory_version,
-            "last_updated": memory.last_updated.isoformat() if memory.last_updated else None,
-            "total_sessions_analyzed": memory.total_sessions_analyzed,
+            "user_id": str(getattr(memory, "user_id", user_id)),
+            "style_model": _coerce_memory_mapping(getattr(memory, "style_model", None)),
+            "work_patterns": _coerce_memory_mapping(
+                getattr(memory, "work_patterns", None)
+            ),
+            "project_knowledge": _coerce_memory_mapping(
+                getattr(memory, "project_knowledge", None)
+            ),
+            "communication_style": _coerce_memory_mapping(
+                getattr(memory, "communication_style", None)
+            ),
+            "structural_preferences": _coerce_memory_mapping(
+                getattr(memory, "structural_preferences", None)
+            ),
+            "skill_profile": _coerce_memory_mapping(
+                getattr(memory, "skill_profile", None)
+            ),
+            "explicit_preferences": _coerce_memory_list(
+                getattr(memory, "explicit_preferences", None)
+            ),
+            "proactive_queue": _coerce_memory_list(
+                getattr(memory, "proactive_queue", None)
+            ),
+            "memory_version": _coerce_memory_int(
+                getattr(memory, "memory_version", None), 0
+            ),
+            "last_updated": MemoryEngine._serialize_memory_timestamp(
+                getattr(memory, "last_updated", None)
+            ),
+            "total_sessions_analyzed": _coerce_memory_int(
+                getattr(memory, "total_sessions_analyzed", None), 0
+            ),
         }
 
 
@@ -523,6 +635,95 @@ async def _get_or_create_memory(
         db.add(memory)
         await db.flush()
     return memory
+
+
+def _coerce_memory_mapping(value: object) -> dict[str, Any]:
+    """Normalize legacy JSONB payloads to dicts for runtime safety."""
+    if value is None:
+        return {}
+    if isinstance(value, Mapping):
+        return dict(value)
+    if isinstance(value, (list, tuple)):
+        try:
+            return dict(value)
+        except (TypeError, ValueError):
+            return {}
+    if isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            return {}
+        try:
+            parsed = json.loads(normalized)
+        except ValueError:
+            return {}
+        if isinstance(parsed, Mapping):
+            return dict(parsed)
+    return {}
+
+
+def _coerce_memory_list(value: object) -> list[Any]:
+    """Normalize legacy JSONB payloads to lists for runtime safety."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return list(value)
+    if isinstance(value, tuple):
+        return list(value)
+    if isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            return []
+        try:
+            parsed = json.loads(normalized)
+        except ValueError:
+            return []
+        if isinstance(parsed, list):
+            return list(parsed)
+    return []
+
+
+def _coerce_memory_row_list(value: object) -> list[object]:
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    return []
+
+
+def _coerce_memory_int(value: object, fallback: int = 0) -> int:
+    if isinstance(value, bool):
+        return fallback
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return fallback
+        return int(value)
+    if isinstance(value, str):
+        try:
+            parsed = float(value.strip())
+        except ValueError:
+            return fallback
+        if not math.isfinite(parsed):
+            return fallback
+        return int(parsed)
+    return fallback
+
+
+def _coerce_memory_float(value: object, fallback: float = 0.0) -> float:
+    if isinstance(value, bool):
+        return fallback
+    if isinstance(value, (int, float)):
+        try:
+            parsed = float(value)
+        except OverflowError:
+            return fallback
+        return parsed if math.isfinite(parsed) else fallback
+    if isinstance(value, str):
+        try:
+            parsed = float(value.strip())
+        except ValueError:
+            return fallback
+        return parsed if math.isfinite(parsed) else fallback
+    return fallback
 
 
 def _extract_explicit_preferences(text: str, prefs: list[Any]) -> None:

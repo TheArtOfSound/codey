@@ -214,6 +214,7 @@ export default function MemoryViewerPage() {
   const [memories, setMemories] = useState<MemoryItem[]>([]);
   const [timeline, setTimeline] = useState<MemoryUpdate[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [addingTo, setAddingTo] = useState<string | null>(null);
   const [newKey, setNewKey] = useState("");
   const [newValue, setNewValue] = useState("");
@@ -232,16 +233,7 @@ export default function MemoryViewerPage() {
         setTimeline(timelineData);
       } catch (err) {
         console.error("Failed to load memory:", err);
-        // Use demo data for initial display
-        setMemories([
-          { id: "1", dimension: "language_preferences", key: "Primary Language", value: "Codey knows you prefer Python and TypeScript", updated_at: new Date().toISOString() },
-          { id: "2", dimension: "coding_style", key: "Naming Convention", value: "You use snake_case in Python and camelCase in TypeScript", updated_at: new Date().toISOString() },
-          { id: "3", dimension: "coding_style", key: "Comments", value: "You write minimal comments, preferring self-documenting code", updated_at: new Date().toISOString() },
-          { id: "4", dimension: "communication", key: "Response Style", value: "You prefer concise explanations with code examples", updated_at: new Date().toISOString() },
-          { id: "5", dimension: "project_context", key: "Active Project", value: "Working on a SaaS platform with Next.js frontend and FastAPI backend", updated_at: new Date().toISOString() },
-          { id: "6", dimension: "workflow", key: "Git Flow", value: "You use feature branches with squash merges", updated_at: new Date().toISOString() },
-          { id: "7", dimension: "personal", key: "Editor", value: "VS Code with Vim keybindings", updated_at: new Date().toISOString() },
-        ]);
+        setError("Failed to load memory.");
         setTimeline([]);
       } finally {
         setLoading(false);
@@ -340,6 +332,15 @@ export default function MemoryViewerPage() {
     return (
       <div className="flex h-64 items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin text-codey-green" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="mx-auto max-w-5xl rounded-xl border border-codey-red/30 bg-codey-card p-6">
+        <h1 className="text-2xl font-bold text-codey-text">Memory</h1>
+        <p className="mt-2 text-sm text-codey-red">{error}</p>
       </div>
     );
   }

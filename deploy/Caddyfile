@@ -1,0 +1,23 @@
+{
+	email {$ACME_EMAIL}
+}
+
+codey.imagineqira.com {
+	encode zstd gzip
+
+	@api path /api/proxy/*
+	handle @api {
+		uri strip_prefix /api/proxy
+		reverse_proxy backend:8000
+	}
+
+	@session_ws path /sessions/*
+	reverse_proxy @session_ws backend:8000
+
+	@build_ws path_regexp buildws ^/build/[^/]+/stream$
+	reverse_proxy @build_ws backend:8000
+
+	handle {
+		reverse_proxy frontend:3000
+	}
+}

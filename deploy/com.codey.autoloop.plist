@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.codey.autoloop</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>/Users/bry/nous/codey/deploy/codey-codex-loop.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/bry/nous/codey</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/Applications/Codex.app/Contents/Resources:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>CODEY_LOOP_IDLE_SECONDS</key>
+    <string>1</string>
+    <key>CODEY_LOOP_FAILURE_BACKOFF_SECONDS</key>
+    <string>15</string>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/Users/bry/.codex/codey-autoloop/launchd.out</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/bry/.codex/codey-autoloop/launchd.err</string>
+</dict>
+</plist>

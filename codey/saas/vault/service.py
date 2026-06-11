@@ -5,19 +5,36 @@ from __future__ import annotations
 import io
 import json
 import logging
+import math
+import re
 import uuid
 import zipfile
 from datetime import datetime
 from typing import Any
+from urllib.parse import urlparse, urlunparse
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from codey.saas.archive_utils import dedupe_archive_path, safe_archive_path
 from codey.saas.models.export import Export
 from codey.saas.models.project import Project
 from codey.saas.models.project_version import ProjectVersion
 
 logger = logging.getLogger(__name__)
+_HTTP_URL_RE = re.compile(r"https?://[^\s\"'<>]+")
+_URL_QUERY_SECRET_RE = re.compile(
+    r"(?i)([?&#](?:api[_-]?key|access[_-]?token|auth[_-]?token|refresh[_-]?token|"
+    r"client[_-]?secret|password|token|secret)=)[^&#\s]+"
+)
+_NAMED_SECRET_RE = re.compile(
+    r"(?i)(\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|refresh[_-]?token|"
+    r"client[_-]?secret|password|token|secret|authorization)"
+    r"\b\s*[:=]\s*(?:Bearer\s+)?[\"']?)[^\"'\s,}&]+"
+)
+_EMAIL_ADDRESS_RE = re.compile(
+    r"\b[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b"
+)
 
 
 class VaultService:
@@ -25,6 +42,150 @@ class VaultService:
 
     def __init__(self, db: AsyncSession) -> None:
         self._db = db
+
+    @staticmethod
+    def _coerce_vault_mapping(value: object) -> dict[str, Any] | None:
+        if isinstance(value, dict):
+            return dict(value)
+        if isinstance(value, (list, tuple)):
+            try:
+                return dict(value)
+            except (TypeError, ValueError):
+                return None
+        if isinstance(value, str):
+            normalized = value.strip()
+            if not normalized:
+                return None
+            try:
+                parsed = json.loads(normalized)
+            except ValueError:
+                return None
+            if isinstance(parsed, dict):
+                return dict(parsed)
+        return None
+
+    @staticmethod
+    def _serialize_vault_timestamp(value: object) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        return str(value)
+
+    @staticmethod
+    def _json_safe_vault_value(
+        value: Any,
+        _seen: set[int] | None = None,
+        *,
+        _coerce_unknown: bool = True,
+    ) -> Any:
+        if value is None or isinstance(value, (bool, int, str)):
+            return value
+        if isinstance(value, float):
+            return value if math.isfinite(value) else 0.0
+        if isinstance(value, bytes):
+            return value.decode("utf-8", errors="replace")
+        if _seen is None:
+            _seen = set()
+        if isinstance(value, dict):
+            value_id = id(value)
+            if value_id in _seen:
+                return "[Circular]"
+            _seen.add(value_id)
+            try:
+                return {
+                    str(key): VaultService._json_safe_vault_value(item, _seen)
+                    for key, item in value.items()
+                }
+            finally:
+                _seen.remove(value_id)
+        if isinstance(value, (set, frozenset)):
+            value_id = id(value)
+            if value_id in _seen:
+                return "[Circular]"
+            _seen.add(value_id)
+            try:
+                return [
+                    VaultService._json_safe_vault_value(item, _seen)
+                    for item in sorted(
+                        value,
+                        key=lambda item: (type(item).__name__, repr(item)),
+                    )
+                ]
+            finally:
+                _seen.remove(value_id)
+        if isinstance(value, (list, tuple)):
+            value_id = id(value)
+            if value_id in _seen:
+                return "[Circular]"
+            _seen.add(value_id)
+            try:
+                return [
+                    VaultService._json_safe_vault_value(item, _seen)
+                    for item in value
+                ]
+            finally:
+                _seen.remove(value_id)
+        return str(value) if _coerce_unknown else value
+
+    @staticmethod
+    def _stringify_vault_content(value: Any) -> str:
+        if isinstance(value, str):
+            return value
+        try:
+            return json.dumps(
+                VaultService._json_safe_vault_value(value, _coerce_unknown=False),
+                allow_nan=False,
+            )
+        except (TypeError, ValueError):
+            return str(value)
+
+    @staticmethod
+    def _coerce_vault_version_number(value: object) -> int:
+        if isinstance(value, bool):
+            return 0
+        try:
+            version_number = int(value)
+        except (TypeError, ValueError, OverflowError):
+            return 0
+        return version_number if version_number > 0 else 0
+
+    @staticmethod
+    def _coerce_vault_row_list(value: object) -> list[Any]:
+        if isinstance(value, (list, tuple)):
+            return list(value)
+        return []
+
+    @staticmethod
+    def _redact_vault_error(value: object) -> str:
+        text = str(value)
+
+        def _redact_url(match: re.Match[str]) -> str:
+            raw_url = match.group(0)
+            try:
+                parsed = urlparse(raw_url)
+                port = parsed.port
+            except ValueError:
+                return raw_url
+            if not parsed.scheme or not parsed.netloc:
+                return raw_url
+
+            hostname = parsed.hostname or ""
+            netloc = hostname
+            if port is not None:
+                netloc = f"{netloc}:{port}"
+            query = "redacted=***" if parsed.query else ""
+            return urlunparse(
+                (parsed.scheme, netloc, parsed.path, parsed.params, query, "")
+            )
+
+        text = _HTTP_URL_RE.sub(_redact_url, text)
+        text = _URL_QUERY_SECRET_RE.sub(r"\1***", text)
+        text = _NAMED_SECRET_RE.sub(r"\1***", text)
+        return _EMAIL_ADDRESS_RE.sub(r"***@\1", text)
 
     # ------------------------------------------------------------------
     # Projects
@@ -96,7 +257,8 @@ class VaultService:
             .where(ProjectVersion.project_id == project_id)
         )
         current_max = result.scalar_one()
-        next_version = current_max + 1
+        next_version = self._coerce_vault_version_number(current_max) + 1
+        normalized_nfet_state = self._coerce_vault_mapping(nfet_state)
 
         version = ProjectVersion(
             project_id=project_id,
@@ -105,13 +267,13 @@ class VaultService:
             commit_message=commit_message,
             files_changed=files_changed,
             diff=diff,
-            nfet_state=nfet_state,
+            nfet_state=normalized_nfet_state,
         )
 
         # Extract NFET metrics from state if present
-        if nfet_state:
-            version.nfet_phase = nfet_state.get("phase")
-            version.es_score = nfet_state.get("es_score")
+        if normalized_nfet_state:
+            version.nfet_phase = normalized_nfet_state.get("phase")
+            version.es_score = normalized_nfet_state.get("es_score")
 
         self._db.add(version)
 
@@ -121,9 +283,9 @@ class VaultService:
             project.total_versions = next_version
             project.total_sessions = (project.total_sessions or 0) + (1 if session_id else 0)
             project.last_activity = datetime.utcnow()
-            if nfet_state:
-                project.latest_nfet_phase = nfet_state.get("phase")
-                project.latest_es_score = nfet_state.get("es_score")
+            if normalized_nfet_state:
+                project.latest_nfet_phase = normalized_nfet_state.get("phase")
+                project.latest_es_score = normalized_nfet_state.get("es_score")
 
         await self._db.flush()
         logger.info(
@@ -141,7 +303,7 @@ class VaultService:
             .where(ProjectVersion.project_id == project_id)
             .order_by(ProjectVersion.version_number.desc())
         )
-        return list(result.scalars().all())
+        return self._coerce_vault_row_list(result.scalars().all())
 
     async def restore_version(
         self,
@@ -228,9 +390,14 @@ class VaultService:
             export_record.status = "completed"
             export_record.completed_at = datetime.utcnow()
         except Exception as exc:
-            logger.exception("Export failed for project %s", project_id)
+            safe_error = self._redact_vault_error(exc)
+            logger.error(
+                "Export failed for project %s: %s",
+                self._redact_vault_error(project_id),
+                safe_error,
+            )
             export_record.status = "failed"
-            export_record.error_message = str(exc)
+            export_record.error_message = safe_error
 
         await self._db.flush()
         return export_record
@@ -242,7 +409,7 @@ class VaultService:
             .where(Export.user_id == user_id)
             .order_by(Export.created_at.desc())
         )
-        return list(result.scalars().all())
+        return self._coerce_vault_row_list(result.scalars().all())
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -270,12 +437,21 @@ class VaultService:
             raise ValueError("No versions to export")
 
         latest = versions[0]  # Already sorted newest first
-        snapshot = latest.file_snapshot or {}
+        snapshot = self._coerce_vault_mapping(latest.file_snapshot) or {}
+        if not snapshot:
+            raise ValueError("No project files available for export")
 
         buf = io.BytesIO()
+        seen_archive_paths: set[str] = set()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
             for filepath, content in snapshot.items():
-                zf.writestr(filepath, content if isinstance(content, str) else json.dumps(content))
+                zf.writestr(
+                    dedupe_archive_path(
+                        safe_archive_path(filepath),
+                        seen_archive_paths,
+                    ),
+                    self._stringify_vault_content(content),
+                )
 
         export_record.file_size_bytes = buf.tell()
         # In production, upload buf.getvalue() to S3 and set file_url.
@@ -325,13 +501,18 @@ class VaultService:
                     "files_changed": v.files_changed,
                     "nfet_phase": v.nfet_phase,
                     "es_score": v.es_score,
-                    "created_at": v.created_at.isoformat() if v.created_at else None,
+                    "created_at": self._serialize_vault_timestamp(v.created_at),
                 }
                 for v in versions
             ],
         }
 
-        raw = json.dumps(payload, indent=2)
+        raw = json.dumps(
+            self._json_safe_vault_value(payload),
+            indent=2,
+            default=str,
+            allow_nan=False,
+        )
         export_record.file_size_bytes = len(raw.encode())
         export_record.metadata_ = {
             "format": "json",

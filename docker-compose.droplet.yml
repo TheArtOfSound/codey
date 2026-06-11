@@ -1,0 +1,94 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: codey
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-codey_droplet}
+      POSTGRES_DB: codey
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./codey/saas/migrations/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codey"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env.droplet
+    environment:
+      DATABASE_URL: postgresql+asyncpg://codey:${POSTGRES_PASSWORD:-codey_droplet}@postgres:5432/codey
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "127.0.0.1:8001:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A codey.saas.tasks.celery_app worker --loglevel=info --concurrency=4 -Q default,autonomous,billing,builds
+    restart: unless-stopped
+    env_file: .env.droplet
+    environment:
+      DATABASE_URL: postgresql+asyncpg://codey:${POSTGRES_PASSWORD:-codey_droplet}@postgres:5432/codey
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery_beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A codey.saas.tasks.celery_app beat --loglevel=info
+    restart: unless-stopped
+    env_file: .env.droplet
+    environment:
+      DATABASE_URL: postgresql+asyncpg://codey:${POSTGRES_PASSWORD:-codey_droplet}@postgres:5432/codey
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: /api/proxy
+        NEXT_SERVER_API_URL: http://backend:8000
+        NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY:-}
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "127.0.0.1:3001:3000"
+
+volumes:
+  pgdata:
+  redisdata:

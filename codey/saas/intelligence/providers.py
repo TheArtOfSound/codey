@@ -2,11 +2,44 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Any
 
-from openai import AsyncOpenAI
+try:
+    from openai import AsyncOpenAI
+except ModuleNotFoundError as exc:  # pragma: no cover - exercised in dependency-light tests
+    if exc.name != "openai":
+        raise
+    _OPENAI_IMPORT_ERROR: ModuleNotFoundError | None = exc
+    AsyncOpenAI: Any = None
+else:  # pragma: no cover - depends on optional runtime dependency
+    _OPENAI_IMPORT_ERROR = None
 
 logger = logging.getLogger(__name__)
+
+_URL_CREDENTIAL_RE = re.compile(
+    r"([A-Za-z][A-Za-z0-9+.-]*://)[^/@\s]+(?::[^/@\s]*)?@"
+)
+_URL_QUERY_SECRET_RE = re.compile(
+    r"(?i)([?&](?:api[_-]?key|access[_-]?token|auth[_-]?token|"
+    r"refresh[_-]?token|client[_-]?secret|token|secret|password)=)[^&\s]+"
+)
+_NAMED_SECRET_RE = re.compile(
+    r"(?i)(\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|"
+    r"refresh[_-]?token|client[_-]?secret|token|secret|password|authorization)"
+    r"\b\s*[:=]\s*(?:Bearer\s+)?[\"']?)[^\"'\s,}&]+"
+)
+_EMAIL_ADDRESS_RE = re.compile(
+    r"\b[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b"
+)
+
+
+def _redact_provider_error(value: object) -> str:
+    text = str(value)
+    text = _URL_CREDENTIAL_RE.sub(r"\1***@", text)
+    text = _URL_QUERY_SECRET_RE.sub(r"\1***", text)
+    text = _NAMED_SECRET_RE.sub(r"\1***", text)
+    return _EMAIL_ADDRESS_RE.sub(r"***@\1", text)
 
 # ---------------------------------------------------------------------------
 # Provider registry — base URLs and env var names for API keys
@@ -86,7 +119,7 @@ MODELS: dict[str, dict[str, str]] = {
 # Fallback models when primary is rate-limited (tried in order)
 FALLBACK_MODELS: list[dict[str, str]] = [
     # Free models (different providers to spread rate limits)
-    {"provider": "openrouter", "model": "mistralai/mistral-small-3.1-24b-instruct:free"},
+    {"provider": "openrouter", "model": "meta-llama/llama-3.3-70b-instruct:free"},
     {"provider": "openrouter", "model": "google/gemma-3-27b-it:free"},
     # Paid but extremely cheap fallback (~$0.0001/request) — works when all free are throttled
     {"provider": "openrouter", "model": "deepseek/deepseek-chat"},
@@ -98,6 +131,68 @@ FALLBACK_MODELS: list[dict[str, str]] = [
 # ---------------------------------------------------------------------------
 
 _client_cache: dict[str, AsyncOpenAI] = {}
+
+
+def _require_openai_sdk() -> None:
+    if _OPENAI_IMPORT_ERROR is not None:
+        raise RuntimeError("openai is required for AI provider clients") from _OPENAI_IMPORT_ERROR
+
+
+def _coerce_provider_text(value: object) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, dict):
+        for key in ("content", "text", "output", "code"):
+            candidate = value.get(key)
+            if candidate is None:
+                continue
+            normalized = _coerce_provider_text(candidate)
+            if normalized:
+                return normalized
+        return ""
+    if isinstance(value, list):
+        parts: list[str] = []
+        for item in value:
+            candidate = _coerce_provider_text(item).strip()
+            if candidate:
+                parts.append(candidate)
+        return "\n".join(parts)
+
+    text_attr = getattr(value, "text", None)
+    if text_attr is not None and text_attr is not value:
+        return _coerce_provider_text(text_attr)
+
+    content_attr = getattr(value, "content", None)
+    if content_attr is not None and content_attr is not value:
+        return _coerce_provider_text(content_attr)
+
+    return ""
+
+
+def _coerce_provider_choices(value: object) -> list[Any]:
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    return []
+
+
+def _has_ascii_control(value: str) -> bool:
+    return any(ord(char) < 32 or ord(char) == 127 for char in value)
+
+
+def _has_whitespace(value: str) -> bool:
+    return any(char.isspace() for char in value)
+
+
+def _coerce_non_empty_provider_env(name: str) -> str | None:
+    value = os.environ.get(name)
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if _has_ascii_control(normalized) or _has_whitespace(normalized):
+        return None
+    return normalized or None
 
 
 def get_client(provider: str) -> AsyncOpenAI:
@@ -114,7 +209,7 @@ def get_client(provider: str) -> AsyncOpenAI:
         raise ValueError(f"Unknown provider: {provider}")
 
     key_env = cfg["key_env"]
-    api_key = os.environ.get(key_env)
+    api_key = _coerce_non_empty_provider_env(key_env)
     if not api_key:
         raise RuntimeError(
             f"Provider '{provider}' requires env var {key_env} but it is not set"
@@ -123,9 +218,11 @@ def get_client(provider: str) -> AsyncOpenAI:
     base_url = cfg["base"]
     # Cloudflare requires account ID in the URL
     if "{account_id}" in base_url:
-        account_id = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
+        account_id = _coerce_non_empty_provider_env("CLOUDFLARE_ACCOUNT_ID") or ""
         base_url = base_url.replace("{account_id}", account_id)
 
+    _require_openai_sdk()
+    assert AsyncOpenAI is not None
     client = AsyncOpenAI(
         api_key=api_key,
         base_url=base_url,
@@ -159,7 +256,11 @@ async def call_model(
         )
     except Exception as e:
         if "429" in str(e) or "rate" in str(e).lower():
-            logger.warning("Primary model %s/%s rate-limited, trying fallbacks", provider, model)
+            logger.warning(
+                "Primary model %s/%s rate-limited, trying fallbacks",
+                _redact_provider_error(provider),
+                _redact_provider_error(model),
+            )
             for fb in FALLBACK_MODELS:
                 try:
                     return await _call_model_once(
@@ -168,7 +269,12 @@ async def call_model(
                         stream=stream, **kwargs,
                     )
                 except Exception as fb_err:
-                    logger.warning("Fallback %s/%s failed: %s", fb["provider"], fb["model"], fb_err)
+                    logger.warning(
+                        "Fallback %s/%s failed: %s",
+                        _redact_provider_error(fb["provider"]),
+                        _redact_provider_error(fb["model"]),
+                        _redact_provider_error(fb_err),
+                    )
                     continue
         raise
 
@@ -199,21 +305,29 @@ async def _call_model_once(
         async for chunk in await client.chat.completions.create(
             stream=True, **create_kwargs
         ):
-            delta = chunk.choices[0].delta if chunk.choices else None
-            if delta and delta.content:
-                chunks.append(delta.content)
+            choices = _coerce_provider_choices(getattr(chunk, "choices", None))
+            delta = getattr(choices[0], "delta", None) if choices else None
+            content = getattr(delta, "content", None)
+            if content:
+                normalized = _coerce_provider_text(content)
+                if normalized:
+                    chunks.append(normalized)
         return "".join(chunks)
 
     response = await client.chat.completions.create(**create_kwargs)
-    choice = response.choices[0]
-    return choice.message.content or ""
+    choices = _coerce_provider_choices(getattr(response, "choices", None))
+    if not choices:
+        raise RuntimeError("AI provider returned no choices")
+    choice = choices[0]
+    message = getattr(choice, "message", None)
+    return _coerce_provider_text(getattr(message, "content", None))
 
 
 def get_available_providers() -> dict[str, dict[str, str]]:
     """Return a dict of providers whose API key env vars are currently set."""
     available: dict[str, dict[str, str]] = {}
     for name, cfg in PROVIDERS.items():
-        if os.environ.get(cfg["key_env"]):
+        if _coerce_non_empty_provider_env(cfg["key_env"]):
             available[name] = cfg
         else:
             logger.debug("Provider '%s' skipped — %s not set", name, cfg["key_env"])
@@ -240,13 +354,13 @@ def resolve_model(task_key: str) -> tuple[str, str]:
     provider_name = spec["provider"]
 
     # Check if the provider is available
-    if os.environ.get(PROVIDERS[provider_name]["key_env"]):
+    if _coerce_non_empty_provider_env(PROVIDERS[provider_name]["key_env"]):
         return provider_name, spec["model"]
 
     # Fall back to default
     default_spec = MODELS["default"]
     default_provider = default_spec["provider"]
-    if os.environ.get(PROVIDERS[default_provider]["key_env"]):
+    if _coerce_non_empty_provider_env(PROVIDERS[default_provider]["key_env"]):
         logger.warning(
             "Provider '%s' unavailable for task '%s', falling back to default (%s/%s)",
             provider_name,

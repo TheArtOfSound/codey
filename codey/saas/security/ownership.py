@@ -7,7 +7,8 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from codey.saas.database import get_db
+from codey.saas.auth.cookies import SESSION_COOKIE_NAME
+from codey.saas.database import get_db, set_db_user_context
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,48 @@ _RESOURCE_MAP: dict[str, tuple[str, str]] = {
     "export": ("exports", "user_id"),
     "memory": ("user_memory", "user_id"),
 }
+
+
+def _request_user_id(request: Request) -> uuid.UUID:
+    try:
+        from codey.saas.auth.jwt import decode_access_token, normalize_access_token_candidate
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        ) from exc
+
+    auth_header = request.headers.get("authorization", "")
+    candidates: list[object] = []
+    if isinstance(auth_header, str):
+        auth_parts = auth_header.strip().split(None, 1)
+        if len(auth_parts) == 2 and auth_parts[0].lower() == "bearer":
+            candidates.append(auth_parts[1])
+    candidates.append(request.cookies.get(SESSION_COOKIE_NAME))
+
+    for candidate in candidates:
+        normalized = normalize_access_token_candidate(candidate)
+        if normalized is None:
+            continue
+        try:
+            payload = decode_access_token(normalized)
+        except Exception:
+            continue
+        user_id_str = normalize_access_token_candidate(payload.get("sub"))
+        if user_id_str is None:
+            continue
+        try:
+            return uuid.UUID(user_id_str)
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token",
+            ) from None
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Not authenticated",
+    )
 
 
 async def verify_ownership(
@@ -134,29 +177,8 @@ def require_ownership(resource_type: str):
         request: Request,
         db: AsyncSession = Depends(get_db),
     ) -> bool:
-        # Extract user from request state (set by get_current_user).
-        from codey.saas.auth.dependencies import get_current_user
-
-        # We need to resolve the user manually since we can't Depends() on
-        # get_current_user here without it running twice.  Instead we look
-        # for the user in the path operation's resolved dependencies via
-        # request.state, or re-resolve the token.
-        token = request.headers.get("authorization", "")
-        if not token.startswith("Bearer "):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Not authenticated",
-            )
-        from codey.saas.auth.jwt import decode_access_token
-
-        payload = decode_access_token(token.split(" ", 1)[1])
-        user_id_str = payload.get("sub")
-        if user_id_str is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token",
-            )
-        user_id = uuid.UUID(user_id_str)
+        user_id = _request_user_id(request)
+        await set_db_user_context(db, str(user_id))
 
         # Extract resource_id from path parameters.
         resource_id_str = request.path_params.get("resource_id")
@@ -165,7 +187,13 @@ def require_ownership(resource_type: str):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Missing resource_id path parameter",
             )
-        resource_id = uuid.UUID(str(resource_id_str))
+        try:
+            resource_id = uuid.UUID(str(resource_id_str))
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid resource_id path parameter",
+            ) from exc
 
         return await verify_ownership(user_id, resource_id, resource_type, db)
 

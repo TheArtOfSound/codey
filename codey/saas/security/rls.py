@@ -30,28 +30,67 @@ before running any tenant-scoped queries.
 """
 
 # ---------------------------------------------------------------------------
-# Tables that require RLS
+# Tables that require RLS.
+#
+# The ``users`` and ``security_audit_log`` tables are intentionally excluded
+# because unauthenticated signup/login and internal audit writes must work
+# before an authenticated user context exists.
 # ---------------------------------------------------------------------------
 
-_RLS_TABLES: list[str] = [
-    "coding_sessions",
-    "repositories",
-    "credit_transactions",
-    "user_memory",
-    "projects",
-    "project_versions",
-    "exports",
-]
+_RLS_POLICY_EXPRESSIONS: dict[str, str] = {
+    "credit_transactions": "user_id = codey_current_user_id()",
+    "coding_sessions": "user_id = codey_current_user_id()",
+    "repositories": "user_id = codey_current_user_id()",
+    "user_memory": "user_id = codey_current_user_id()",
+    "memory_update_logs": "user_id = codey_current_user_id()",
+    "projects": "user_id = codey_current_user_id()",
+    "project_versions": (
+        "project_id IN (SELECT id FROM projects WHERE user_id = codey_current_user_id())"
+    ),
+    "exports": "user_id = codey_current_user_id()",
+    "referrals": (
+        "referrer_id = codey_current_user_id() OR referred_id = codey_current_user_id()"
+    ),
+    "session_costs": "user_id = codey_current_user_id()",
+    "api_keys": "user_id = codey_current_user_id()",
+    "build_projects": "user_id = codey_current_user_id()",
+    "build_files": (
+        "project_id IN (SELECT id FROM build_projects WHERE user_id = codey_current_user_id())"
+    ),
+    "build_checkpoints": (
+        "project_id IN (SELECT id FROM build_projects WHERE user_id = codey_current_user_id())"
+    ),
+    "project_memories": "user_id = codey_current_user_id()",
+    "cost_overflow_events": "user_id = codey_current_user_id()",
+}
+_RLS_TABLES: list[str] = list(_RLS_POLICY_EXPRESSIONS)
 
 # ---------------------------------------------------------------------------
 # Function to set the current user at connection time
 # ---------------------------------------------------------------------------
 
 SQL_SET_USER_FUNCTION: str = """
+CREATE OR REPLACE FUNCTION codey_current_user_id()
+RETURNS UUID AS $$
+DECLARE
+    raw_uid TEXT;
+BEGIN
+    raw_uid := nullif(current_setting('app.current_user_id', true), '');
+    IF raw_uid IS NULL THEN
+        RETURN NULL;
+    END IF;
+
+    RETURN raw_uid::UUID;
+EXCEPTION
+    WHEN invalid_text_representation THEN
+        RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
 CREATE OR REPLACE FUNCTION set_current_user_id(uid TEXT)
 RETURNS VOID AS $$
 BEGIN
-    PERFORM set_config('app.current_user_id', uid, true);
+    PERFORM set_config('app.current_user_id', COALESCE(uid, ''), true);
 END;
 $$ LANGUAGE plpgsql;
 """.strip()
@@ -73,18 +112,20 @@ SQL_FORCE_RLS: list[str] = [
 # ---------------------------------------------------------------------------
 # Row-level policies — one per table.
 #
-# Each policy restricts SELECT, INSERT, UPDATE, and DELETE to rows where
-# ``user_id`` matches the session-level GUC ``app.current_user_id``.
+# Each policy restricts SELECT, INSERT, UPDATE, and DELETE to rows owned by
+# the session-level GUC ``app.current_user_id``. Child tables use parent-row
+# ownership subqueries when they do not carry their own ``user_id`` column.
 # ---------------------------------------------------------------------------
 
 SQL_CREATE_POLICIES: list[str] = [
     f"""
+DROP POLICY IF EXISTS user_isolation_{table} ON {table};
 CREATE POLICY user_isolation_{table} ON {table}
     FOR ALL
-    USING (user_id = current_setting('app.current_user_id')::UUID)
-    WITH CHECK (user_id = current_setting('app.current_user_id')::UUID);
+    USING ({expression})
+    WITH CHECK ({expression});
 """.strip()
-    for table in _RLS_TABLES
+    for table, expression in _RLS_POLICY_EXPRESSIONS.items()
 ]
 
 # ---------------------------------------------------------------------------

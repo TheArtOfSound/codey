@@ -1,49 +1,78 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth";
+import { api } from "@/lib/api";
+import {
+  clearPendingOAuthRequest,
+  loadPendingOAuthRequest,
+} from "@/lib/oauth";
 
-export default function OAuthCallbackPage() {
+function OAuthCallbackPageContent() {
   const { loginWithGitHub, loginWithGoogle } = useAuth();
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const code = searchParams.get("code");
-    const provider = searchParams.get("provider") || detectProvider();
-
-    if (!code) {
-      setError("No authorization code received.");
-      return;
-    }
+    const state = searchParams.get("state");
+    const authComplete = searchParams.get("auth_complete") === "1";
+    const pending = loadPendingOAuthRequest();
 
     async function handleCallback() {
       try {
-        if (provider === "google") {
-          await loginWithGoogle(code!);
-        } else {
-          await loginWithGitHub(code!);
+        async function finalizeRedirect(redirectTo: string) {
+          if (pending?.intent === "signup" && pending.referrerId) {
+            try {
+              await api.claimReferral(pending.referrerId);
+            } catch {
+              // Referral attribution should not block sign-in.
+            }
+          }
+          clearPendingOAuthRequest();
+          window.location.replace(redirectTo);
         }
-        router.push("/dashboard");
+
+        if (authComplete) {
+          if (state && pending && pending.state !== state) {
+            clearPendingOAuthRequest();
+            setError("OAuth state validation failed. Please try again.");
+            return;
+          }
+          const redirectTo = pending?.redirectTo || "/dashboard";
+          await finalizeRedirect(redirectTo);
+          return;
+        }
+
+        if (!code) {
+          setError("No authorization code received.");
+          return;
+        }
+
+        if (!state || !pending || pending.state !== state) {
+          clearPendingOAuthRequest();
+          setError("OAuth state validation failed. Please try again.");
+          return;
+        }
+
+        if (pending.provider === "google") {
+          await loginWithGoogle(code, state);
+        } else {
+          await loginWithGitHub(code, state);
+        }
+        const redirectTo = pending.redirectTo || "/dashboard";
+        await finalizeRedirect(redirectTo);
       } catch (err: unknown) {
+        clearPendingOAuthRequest();
         const apiErr = err as { detail?: string };
         setError(apiErr.detail || "Authentication failed. Please try again.");
       }
     }
 
     handleCallback();
-  }, [searchParams, loginWithGitHub, loginWithGoogle, router]);
-
-  function detectProvider(): string {
-    const state = searchParams.get("state");
-    const scope = searchParams.get("scope");
-    if (scope?.includes("email") && scope?.includes("profile")) return "google";
-    if (state?.includes("google")) return "google";
-    return "github";
-  }
+  }, [searchParams, loginWithGitHub, loginWithGoogle]);
 
   if (error) {
     return (
@@ -69,5 +98,19 @@ export default function OAuthCallbackPage() {
         <span className="text-sm text-codey-text-dim">Completing sign in...</span>
       </div>
     </div>
+  );
+}
+
+export default function OAuthCallbackPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-codey-bg">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-codey-green border-t-transparent" />
+        </div>
+      }
+    >
+      <OAuthCallbackPageContent />
+    </Suspense>
   );
 }

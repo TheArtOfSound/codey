@@ -1,0 +1,220 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CODEX_BIN="${CODEX_BIN:-/Applications/Codex.app/Contents/Resources/codex}"
+CODEX_RESOURCES_DIR="$(cd "$(dirname "$CODEX_BIN")" && pwd)"
+REPO_ROOT="${CODEY_REPO_ROOT:-/Users/bry/nous/codey}"
+STATE_DIR="${CODEY_LOOP_STATE_DIR:-$HOME/.codex/codey-autoloop}"
+RUN_DIR="$STATE_DIR/runs"
+LOCK_DIR="$STATE_DIR/lock"
+THREAD_FILE="$STATE_DIR/thread_id"
+LAST_MESSAGE_FILE="$STATE_DIR/last-message.txt"
+LAST_JSON_FILE="$STATE_DIR/last-run.jsonl"
+IDLE_SECONDS="${CODEY_LOOP_IDLE_SECONDS:-1}"
+FAILURE_BACKOFF_SECONDS="${CODEY_LOOP_FAILURE_BACKOFF_SECONDS:-15}"
+LOCK_ACQUIRED=0
+
+export PATH="$CODEX_RESOURCES_DIR:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin${PATH:+:$PATH}"
+
+mkdir -p "$RUN_DIR"
+
+log() {
+  echo "[$(date -u +%FT%TZ)] $*" >> "$STATE_DIR/loop.log"
+}
+
+acquire_lock() {
+  if mkdir "$LOCK_DIR" 2>/dev/null; then
+    echo "$$" > "$LOCK_DIR/pid"
+    LOCK_ACQUIRED=1
+    return 0
+  fi
+
+  if [[ -f "$LOCK_DIR/pid" ]]; then
+    local lock_pid
+    lock_pid="$(cat "$LOCK_DIR/pid" 2>/dev/null || true)"
+    if [[ -n "$lock_pid" ]] && kill -0 "$lock_pid" 2>/dev/null; then
+      log "loop already running with pid $lock_pid"
+      exit 0
+    fi
+  fi
+
+  rm -rf "$LOCK_DIR"
+  if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    log "loop lock reacquired by another process"
+    exit 0
+  fi
+  echo "$$" > "$LOCK_DIR/pid"
+  LOCK_ACQUIRED=1
+}
+
+cleanup() {
+  if [[ "$LOCK_ACQUIRED" != "1" ]]; then
+    return 0
+  fi
+  if [[ -f "$LOCK_DIR/pid" ]] && [[ "$(cat "$LOCK_DIR/pid" 2>/dev/null || true)" != "$$" ]]; then
+    return 0
+  fi
+  rm -rf "$LOCK_DIR"
+}
+
+handle_interrupt() {
+  cleanup
+  exit 130
+}
+
+handle_terminate() {
+  cleanup
+  exit 143
+}
+
+extract_thread_id() {
+  local jsonl_file="$1"
+  python3 - "$jsonl_file" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+try:
+    lines = path.read_text().splitlines()
+except OSError:
+    raise SystemExit(0)
+for line in lines:
+    line = line.strip()
+    if not line.startswith("{"):
+        continue
+    try:
+        payload = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    if payload.get("type") == "thread.started" and payload.get("thread_id"):
+        print(payload["thread_id"])
+        break
+PY
+}
+
+jsonl_has_turn_completed() {
+  local jsonl_file="$1"
+  python3 - "$jsonl_file" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+try:
+    lines = path.read_text(errors="ignore").splitlines()
+except OSError:
+    print("no")
+    raise SystemExit(0)
+for line in lines:
+    line = line.strip()
+    if not line.startswith("{"):
+        continue
+    try:
+        payload = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    if payload.get("type") == "turn.completed":
+        print("yes")
+        raise SystemExit(0)
+print("no")
+PY
+}
+
+seed_thread_if_needed() {
+  if [[ -s "$THREAD_FILE" ]]; then
+    return 0
+  fi
+
+  local stamp seed_json seed_message thread_id
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  seed_json="$RUN_DIR/${stamp}.seed.jsonl"
+  seed_message="$RUN_DIR/${stamp}.seed.txt"
+
+  "$CODEX_BIN" exec \
+    -C "$REPO_ROOT" \
+    --skip-git-repo-check \
+    --json \
+    -o "$seed_message" \
+    -c approval_policy='"never"' \
+    -c sandbox_mode='"danger-full-access"' \
+    "This thread is reserved for recurring autonomous maintenance passes on the Codey repository at $REPO_ROOT. Future prompts in this thread should inspect the repo, make the highest-value safe improvement, verify it, and summarize briefly. Reply with exactly: INITIALIZED" \
+    > "$seed_json"
+
+  thread_id="$(extract_thread_id "$seed_json")"
+  if [[ -z "$thread_id" ]]; then
+    echo "Failed to seed Codex loop thread" >&2
+    exit 1
+  fi
+
+  printf '%s\n' "$thread_id" > "$THREAD_FILE"
+  log "seeded loop thread $thread_id"
+}
+
+run_once() {
+  local thread_id stamp json_log message_file prompt_file
+  thread_id="$(cat "$THREAD_FILE")"
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  json_log="$RUN_DIR/${stamp}.jsonl"
+  message_file="$RUN_DIR/${stamp}.txt"
+  prompt_file="$RUN_DIR/${stamp}.prompt.txt"
+
+  cat > "$prompt_file" <<EOF
+Continue the autonomous Codey improvement loop for the repository at $REPO_ROOT.
+
+Execution rules:
+- Do one bounded, high-value maintenance pass.
+- Prioritize runtime reliability, autonomous repo-management coverage, deployment stability, worker correctness, tests, and developer workflow.
+- Prefer a concrete safe fix over broad churn.
+- Work directly in the repo when there is a clear improvement.
+- Verify with the narrowest meaningful command.
+- Do not commit, push, or revert unrelated local changes.
+- If there is no safe code change, stop after a concise finding.
+- End with a brief summary of what changed or what blocked progress.
+EOF
+
+  set +e
+  "$CODEX_BIN" exec resume "$thread_id" \
+    --json \
+    -o "$message_file" \
+    -c approval_policy='"never"' \
+    -c sandbox_mode='"danger-full-access"' \
+    "$(cat "$prompt_file")" \
+    > "$json_log"
+  local codex_status=$?
+  set -e
+
+  local completed
+  completed="$(jsonl_has_turn_completed "$json_log")"
+
+  if [[ "$codex_status" -eq 0 && "$completed" == "yes" ]]; then
+    if [[ -s "$message_file" ]]; then
+      cp "$message_file" "$LAST_MESSAGE_FILE"
+    fi
+    cp "$json_log" "$LAST_JSON_FILE"
+    log "completed Codex loop run"
+    return 0
+  fi
+
+  log "incomplete Codex loop run status=$codex_status completed=$completed log=$(basename "$json_log")"
+  return 1
+}
+
+main() {
+  trap cleanup EXIT
+  trap handle_interrupt INT
+  trap handle_terminate TERM
+  acquire_lock
+  seed_thread_if_needed
+  log "daemon started"
+
+  while true; do
+    if run_once; then
+      sleep "$IDLE_SECONDS"
+    else
+      sleep "$FAILURE_BACKOFF_SECONDS"
+    fi
+  done
+}
+
+main "$@"

@@ -6,6 +6,7 @@ import sys
 import time
 import json
 import logging
+import math
 from pathlib import Path
 
 import click
@@ -27,6 +28,51 @@ logger = logging.getLogger("codey")
 
 def _phase_color(phase: Phase) -> str:
     return {"RIDGE": "green", "CAUTION": "yellow", "CRITICAL": "red"}[phase.name]
+
+
+def _json_safe(value, _seen=None):
+    if value is None or isinstance(value, (bool, int, str)):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else 0.0
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if _seen is None:
+        _seen = set()
+    if isinstance(value, dict):
+        value_id = id(value)
+        if value_id in _seen:
+            return "[Circular]"
+        _seen.add(value_id)
+        try:
+            return {str(key): _json_safe(item, _seen) for key, item in value.items()}
+        finally:
+            _seen.remove(value_id)
+    if isinstance(value, (set, frozenset)):
+        value_id = id(value)
+        if value_id in _seen:
+            return "[Circular]"
+        _seen.add(value_id)
+        try:
+            return [
+                _json_safe(item, _seen)
+                for item in sorted(
+                    value,
+                    key=lambda item: (type(item).__name__, repr(item)),
+                )
+            ]
+        finally:
+            _seen.remove(value_id)
+    if isinstance(value, (list, tuple)):
+        value_id = id(value)
+        if value_id in _seen:
+            return "[Circular]"
+        _seen.add(value_id)
+        try:
+            return [_json_safe(item, _seen) for item in value]
+        finally:
+            _seen.remove(value_id)
+    return str(value)
 
 
 def _build_graph(project_path: Path) -> tuple[CodebaseGraph, float]:
@@ -332,12 +378,14 @@ def export(project_path: str, output: str | None):
         ],
     }
 
+    json_text = json.dumps(_json_safe(data), indent=2, allow_nan=False)
+
     if output:
         out_path = Path(output)
-        out_path.write_text(json.dumps(data, indent=2))
+        out_path.write_text(json_text, encoding="utf-8")
         console.print(f"[bold]Exported to {out_path}[/bold]")
     else:
-        console.print_json(json.dumps(data, indent=2))
+        console.print_json(json_text)
 
 
 if __name__ == "__main__":

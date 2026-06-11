@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import math
+import re
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -14,8 +16,21 @@ from codey.saas.credits.service import CreditService
 from codey.saas.models import User
 
 logger = logging.getLogger(__name__)
-
-stripe.api_key = settings.stripe_secret_key
+_URL_CREDENTIAL_RE = re.compile(
+    r"([A-Za-z][A-Za-z0-9+.-]*://)[^/@\s]+(?::[^/@\s]*)?@"
+)
+_URL_QUERY_SECRET_RE = re.compile(
+    r"(?i)([?&#](?:api[_-]?key|access[_-]?token|auth[_-]?token|refresh[_-]?token|"
+    r"client[_-]?secret|token|secret|password)=)[^&#\s]+"
+)
+_NAMED_SECRET_RE = re.compile(
+    r"(?i)(\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|refresh[_-]?token|"
+    r"client[_-]?secret|token|secret|password|authorization)"
+    r"\b\s*[:=]\s*(?:Bearer\s+)?[\"']?)[^\"'\s,}&]+"
+)
+_EMAIL_ADDRESS_RE = re.compile(
+    r"\b[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b"
+)
 
 # Events we care about — everything else is acknowledged and ignored.
 _HANDLED_EVENTS = frozenset(
@@ -30,6 +45,34 @@ _HANDLED_EVENTS = frozenset(
 )
 
 
+def _has_ascii_control(value: str) -> bool:
+    return any(ord(char) < 32 or ord(char) == 127 for char in value)
+
+
+def _has_whitespace(value: str) -> bool:
+    return any(char.isspace() for char in value)
+
+
+def _coerce_non_empty_webhook_text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if _has_ascii_control(normalized) or _has_whitespace(normalized):
+        return None
+    return normalized or None
+
+
+def _redact_webhook_error(value: object) -> str:
+    text = str(value)
+    text = _URL_CREDENTIAL_RE.sub(r"\1***@", text)
+    text = _URL_QUERY_SECRET_RE.sub(r"\1***", text)
+    text = _NAMED_SECRET_RE.sub(r"\1***", text)
+    return _EMAIL_ADDRESS_RE.sub(r"***@\1", text)
+
+
+stripe.api_key = _coerce_non_empty_webhook_text(settings.stripe_secret_key) or ""
+
+
 async def handle_stripe_webhook(
     payload: bytes,
     sig_header: str,
@@ -42,8 +85,9 @@ async def handle_stripe_webhook(
     stops retrying them.
     """
     try:
+        webhook_secret = _coerce_non_empty_webhook_text(settings.stripe_webhook_secret) or ""
         event = stripe.Webhook.construct_event(
-            payload, sig_header, settings.stripe_webhook_secret
+            payload, sig_header, webhook_secret
         )
     except stripe.error.SignatureVerificationError:
         logger.warning("Stripe webhook signature verification failed")
@@ -73,6 +117,47 @@ async def handle_stripe_webhook(
 # ---------------------------------------------------------------------------
 
 
+def _coerce_stripe_metadata(value: object) -> dict[str, str]:
+    if isinstance(value, dict):
+        payload = value
+    elif hasattr(value, "to_dict_recursive"):
+        try:
+            payload = value.to_dict_recursive()
+        except Exception:
+            return {}
+    elif hasattr(value, "to_dict"):
+        try:
+            payload = value.to_dict()
+        except Exception:
+            return {}
+    else:
+        return {}
+
+    if not isinstance(payload, dict):
+        return {}
+    return {
+        str(key): normalized
+        for key, item in payload.items()
+        for normalized in [_coerce_non_empty_webhook_text(item)]
+        if isinstance(key, str) and normalized is not None
+    }
+
+
+def _coerce_stripe_timestamp(value: object) -> datetime | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        timestamp = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(timestamp):
+        return None
+    try:
+        return datetime.fromtimestamp(timestamp, tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
 async def _handle_subscription_created(
     subscription: dict, db: AsyncSession
 ) -> dict:
@@ -85,7 +170,8 @@ async def _handle_subscription_created(
         )
         return {"status": "error", "reason": "user_not_found"}
 
-    plan = subscription.get("metadata", {}).get("codey_plan")
+    metadata = _coerce_stripe_metadata(subscription.get("metadata"))
+    plan = metadata.get("codey_plan")
     if not plan or plan not in PLANS:
         logger.error(
             "subscription.created: missing or invalid codey_plan metadata "
@@ -100,11 +186,9 @@ async def _handle_subscription_created(
     user.credits_remaining = PLANS[plan]["credits"]
     user.credits_used_this_month = 0
 
-    period_end = subscription.get("current_period_end")
-    if period_end:
-        user.subscription_period_end = datetime.fromtimestamp(
-            period_end, tz=timezone.utc
-        )
+    period_end = _coerce_stripe_timestamp(subscription.get("current_period_end"))
+    if period_end is not None:
+        user.subscription_period_end = period_end
 
     await db.flush()
 
@@ -130,7 +214,8 @@ async def _handle_subscription_updated(
         return {"status": "error", "reason": "user_not_found"}
 
     new_status = _map_subscription_status(subscription["status"])
-    new_plan = subscription.get("metadata", {}).get("codey_plan")
+    metadata = _coerce_stripe_metadata(subscription.get("metadata"))
+    new_plan = metadata.get("codey_plan")
 
     # Detect plan change (upgrade / downgrade)
     if new_plan and new_plan in PLANS and new_plan != user.plan:
@@ -150,11 +235,9 @@ async def _handle_subscription_updated(
         user.plan_status = new_status
 
     # Update period end
-    period_end = subscription.get("current_period_end")
-    if period_end:
-        user.subscription_period_end = datetime.fromtimestamp(
-            period_end, tz=timezone.utc
-        )
+    period_end = _coerce_stripe_timestamp(subscription.get("current_period_end"))
+    if period_end is not None:
+        user.subscription_period_end = period_end
 
     await db.flush()
 
@@ -239,9 +322,9 @@ async def _handle_invoice_payment_succeeded(
     if sub_id:
         try:
             sub = stripe.Subscription.retrieve(sub_id)
-            user.subscription_period_end = datetime.fromtimestamp(
-                sub.current_period_end, tz=timezone.utc
-            )
+            period_end = _coerce_stripe_timestamp(sub.current_period_end)
+            if period_end is not None:
+                user.subscription_period_end = period_end
         except stripe.error.StripeError:
             logger.warning(
                 "Could not retrieve subscription %s for period end update",
@@ -273,12 +356,24 @@ async def _handle_invoice_payment_failed(
     user.plan_status = "past_due"
     await db.flush()
 
+    email = _coerce_non_empty_webhook_text(getattr(user, "email", None))
+    if email:
+        try:
+            from codey.saas.emails.service import EmailService
+
+            await EmailService().send_payment_failed(email)
+        except Exception as exc:
+            logger.warning(
+                "invoice.payment_failed: payment failed email skipped for user=%s: %s",
+                user.id,
+                _redact_webhook_error(exc),
+            )
+
     logger.warning(
         "invoice.payment_failed: user=%s marked past_due (invoice=%s)",
         user.id,
         invoice["id"],
     )
-    # Email trigger is handled separately by the notification system
     return {"status": "ok", "event": "invoice.payment_failed"}
 
 
@@ -286,7 +381,7 @@ async def _handle_payment_intent_succeeded(
     payment_intent: dict, db: AsyncSession
 ) -> dict:
     """payment_intent.succeeded — check if this is a top-up purchase and add credits."""
-    metadata = payment_intent.get("metadata", {})
+    metadata = _coerce_stripe_metadata(payment_intent.get("metadata"))
 
     # Only process codey top-up PaymentIntents
     if metadata.get("type") != "codey_topup":
@@ -296,6 +391,11 @@ async def _handle_payment_intent_succeeded(
             "action": "not_a_topup",
         }
 
+    payment_intent_id = _coerce_non_empty_webhook_text(payment_intent.get("id"))
+    if payment_intent_id is None:
+        logger.error("payment_intent.succeeded: missing payment intent id")
+        return {"status": "error", "reason": "missing_payment_intent_id"}
+
     user_id_str = metadata.get("user_id")
     package_key = metadata.get("package")
     credits_str = metadata.get("credits")
@@ -303,7 +403,7 @@ async def _handle_payment_intent_succeeded(
     if not all([user_id_str, package_key, credits_str]):
         logger.error(
             "payment_intent.succeeded: incomplete topup metadata on %s: %s",
-            payment_intent["id"],
+            payment_intent_id,
             metadata,
         )
         return {"status": "error", "reason": "incomplete_metadata"}
@@ -314,13 +414,20 @@ async def _handle_payment_intent_succeeded(
     except (ValueError, TypeError) as exc:
         logger.error(
             "payment_intent.succeeded: bad metadata values on %s: %s",
-            payment_intent["id"],
+            payment_intent_id,
             exc,
         )
         return {"status": "error", "reason": "bad_metadata_values"}
 
     # Validate the credits match the package definition (tamper check)
     pkg = TOPUP_PACKAGES.get(package_key)
+    if not pkg:
+        logger.error(
+            "payment_intent.succeeded: invalid package metadata on %s: %s",
+            payment_intent_id,
+            package_key,
+        )
+        return {"status": "error", "reason": "invalid_package_metadata"}
     if pkg and pkg["credits"] != credits_amount:
         logger.error(
             "payment_intent.succeeded: credits mismatch for %s — "
@@ -336,7 +443,7 @@ async def _handle_payment_intent_succeeded(
     await credit_service.add_topup_credits(
         user_id=user_id,
         amount=credits_amount,
-        stripe_payment_intent_id=payment_intent["id"],
+        stripe_payment_intent_id=payment_intent_id,
     )
 
     await db.flush()
@@ -346,7 +453,7 @@ async def _handle_payment_intent_succeeded(
         user_id,
         package_key,
         credits_amount,
-        payment_intent["id"],
+        payment_intent_id,
     )
     return {
         "status": "ok",
@@ -377,6 +484,9 @@ async def _get_user_by_customer(
     lock: bool = False,
 ) -> User | None:
     """Look up a user by their stripe_customer_id."""
+    customer_id = _coerce_non_empty_webhook_text(customer_id)
+    if customer_id is None:
+        return None
     stmt = select(User).where(User.stripe_customer_id == customer_id)
     if lock:
         stmt = stmt.with_for_update()
@@ -384,7 +494,7 @@ async def _get_user_by_customer(
     return result.scalar_one_or_none()
 
 
-def _map_subscription_status(stripe_status: str) -> str:
+def _map_subscription_status(stripe_status: object) -> str:
     """Map Stripe subscription status to our plan_status values."""
     mapping = {
         "active": "active",
@@ -396,4 +506,9 @@ def _map_subscription_status(stripe_status: str) -> str:
         "incomplete_expired": "cancelled",
         "paused": "paused",
     }
-    return mapping.get(stripe_status, stripe_status)
+    if not isinstance(stripe_status, str):
+        return "incomplete"
+    normalized = stripe_status.strip()
+    if not normalized:
+        return "incomplete"
+    return mapping.get(normalized, normalized)

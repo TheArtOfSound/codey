@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
 from dataclasses import dataclass, field
 from typing import Any
-
-import anthropic
 
 from codey.saas.build_mode.decomposer import TaskNode
 
@@ -24,6 +21,61 @@ _MAX_CONTEXT_CHARS = int(_MAX_CONTEXT_TOKENS * _CHARS_PER_TOKEN)
 _MAX_FULL_SUMMARIES = 40
 # Maximum dependency files to include in full content
 _MAX_FULL_DEPS = 8
+
+
+def _coerce_mapping(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _coerce_generation_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, dict):
+        for key in ("content", "code", "text", "output"):
+            candidate = value.get(key)
+            if candidate is None:
+                continue
+            try:
+                normalized = _coerce_generation_text(candidate)
+            except TypeError:
+                continue
+            if normalized:
+                return normalized
+    if isinstance(value, list):
+        parts: list[str] = []
+        for item in value:
+            try:
+                candidate = _coerce_generation_text(item).strip()
+            except TypeError:
+                continue
+            if candidate:
+                parts.append(candidate)
+        if parts:
+            return "\n".join(parts)
+    raise TypeError("Model returned non-text file content")
+
+
+def _coerce_phase_entries(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    phases: list[dict[str, Any]] = []
+    for raw_phase in value:
+        if not isinstance(raw_phase, dict):
+            continue
+        phase = dict(raw_phase)
+        files = phase.get("files")
+        if isinstance(files, str):
+            phase["files"] = [files] if files else []
+        elif isinstance(files, list):
+            phase["files"] = [
+                entry for entry in files if isinstance(entry, str) and entry
+            ]
+        else:
+            phase["files"] = []
+        phases.append(phase)
+    return phases
 
 
 @dataclass
@@ -62,6 +114,10 @@ class GeneratedFile:
     content: str
     summary: FileSummary
     line_count: int
+
+
+def _count_generated_file_lines(content: str) -> int:
+    return sum(1 for line in content.splitlines() if line.strip())
 
 
 class FileGenerator:
@@ -106,7 +162,7 @@ class FileGenerator:
         )
 
         content = self._parse_file_content(raw_response, task.file_path)
-        line_count = content.count("\n") + 1 if content.strip() else 0
+        line_count = _count_generated_file_lines(content)
         summary = self._create_summary(task.file_path, content)
 
         return GeneratedFile(
@@ -125,8 +181,8 @@ class FileGenerator:
 
         Returns (system_prompt, messages) for the Claude API call.
         """
-        plan = context.project_plan
-        stack = plan.get("stack", {})
+        plan = _coerce_mapping(context.project_plan)
+        stack = _coerce_mapping(plan.get("stack"))
         stack_desc = ", ".join(f"{k}: {v}" for k, v in stack.items()) if stack else "not specified"
 
         # System prompt
@@ -144,6 +200,7 @@ class FileGenerator:
 
         # Build the user message with sections
         sections: list[str] = []
+        summary_section_index: int | None = None
 
         # Section 1: Project plan
         plan_summary = self._format_plan_summary(plan)
@@ -152,6 +209,7 @@ class FileGenerator:
         # Section 2: Already-built file summaries
         summaries_text = self._format_file_summaries(context.file_summaries, task)
         if summaries_text:
+            summary_section_index = len(sections)
             sections.append(f"## ALREADY BUILT (summaries)\n\n{summaries_text}")
 
         # Section 3: Full content of direct dependencies
@@ -204,34 +262,38 @@ class FileGenerator:
                 _MAX_CONTEXT_CHARS,
             )
             # Rebuild with fewer summaries
-            trimmed_summaries = self._format_file_summaries(
-                context.file_summaries, task, max_count=15
-            )
-            sections[1] = f"## ALREADY BUILT (summaries)\n\n{trimmed_summaries}"
-            user_content = "\n\n---\n\n".join(sections)
+            if summary_section_index is not None:
+                trimmed_summaries = self._format_file_summaries(
+                    context.file_summaries, task, max_count=15
+                )
+                sections[summary_section_index] = (
+                    f"## ALREADY BUILT (summaries)\n\n{trimmed_summaries}"
+                )
+                user_content = "\n\n---\n\n".join(sections)
 
         messages = [{"role": "user", "content": user_content}]
         return system_prompt, messages
 
     def _format_plan_summary(self, plan: dict[str, Any]) -> str:
         """Format the project plan for inclusion in the prompt."""
+        plan = _coerce_mapping(plan)
         lines: list[str] = []
         lines.append(f"**Name:** {plan.get('name', 'Unnamed Project')}")
         lines.append(f"**Description:** {plan.get('description', 'No description')}")
 
-        stack = plan.get("stack", {})
+        stack = _coerce_mapping(plan.get("stack"))
         if stack:
             stack_lines = [f"  - {k}: {v}" for k, v in stack.items()]
             lines.append("**Stack:**\n" + "\n".join(stack_lines))
 
         # File tree (compact)
-        file_tree = plan.get("file_tree", {})
+        file_tree = _coerce_mapping(plan.get("file_tree"))
         if file_tree:
             tree_lines = [f"  {fp} ({ft})" for fp, ft in sorted(file_tree.items())]
             lines.append("**File Tree:**\n" + "\n".join(tree_lines))
 
         # Phases summary
-        phases = plan.get("phases", [])
+        phases = _coerce_phase_entries(plan.get("phases"))
         if phases:
             phase_lines = []
             for i, phase in enumerate(phases):
@@ -318,12 +380,12 @@ class FileGenerator:
 
     def _get_phase_description(self, plan: dict[str, Any], phase: int) -> str:
         """Get the description for a specific phase from the plan."""
-        phases = plan.get("phases", [])
+        phases = _coerce_phase_entries(_coerce_mapping(plan).get("phases"))
         if 0 <= phase < len(phases):
             return phases[phase].get("description", "")
         return ""
 
-    def _parse_file_content(self, response: str, file_path: str) -> str:
+    def _parse_file_content(self, response: Any, file_path: str) -> str:
         """Extract clean source code from the LLM response.
 
         Handles:
@@ -331,16 +393,22 @@ class FileGenerator:
         - Code blocks without tags (``` ... ```)
         - Raw code (no code blocks — take everything)
         """
-        # Try to extract from fenced code block
-        # Match ```<optional-lang>\n...\n```
-        pattern = r"```(?:\w+)?\s*\n(.*?)```"
+        response = _coerce_generation_text(response)
+
+        # Try to extract from fenced code block.
+        # Match ```<optional info string>\n...\n```, including metadata like
+        # title="app.py" that some model providers include.
+        pattern = r"```[^\n\r]*\r?\n(.*?)```"
         matches = re.findall(pattern, response, re.DOTALL)
 
         if matches:
             # If multiple code blocks, take the longest one
             # (the main file content is usually the longest)
             content = max(matches, key=len)
-            return content.rstrip()
+            content = content.rstrip()
+            if not content.strip():
+                raise TypeError("Model returned empty file content")
+            return content
 
         # No code blocks — try to find code-like content
         # Strip any leading/trailing prose
@@ -367,15 +435,21 @@ class FileGenerator:
                 code_lines.append(line)
 
         if code_lines:
-            return "\n".join(code_lines).rstrip()
+            content = "\n".join(code_lines).rstrip()
+            if not content.strip():
+                raise TypeError("Model returned empty file content")
+            return content
 
         # Last resort: return the whole response stripped
-        return response.strip()
+        content = response.strip()
+        if not content:
+            raise TypeError("Model returned empty file content")
+        return content
 
     def _create_summary(self, file_path: str, content: str) -> FileSummary:
         """Analyze generated file content and create a compact summary."""
         lines = content.split("\n")
-        line_count = len(lines)
+        line_count = _count_generated_file_lines(content)
 
         exports: list[str] = []
         imports: list[str] = []

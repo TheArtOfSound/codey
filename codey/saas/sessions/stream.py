@@ -3,11 +3,84 @@
 from __future__ import annotations
 
 import logging
+import math
+import re
 from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 logger = logging.getLogger(__name__)
+_URL_CREDENTIAL_RE = re.compile(
+    r"([A-Za-z][A-Za-z0-9+.-]*://)[^/@\s]+(?::[^/@\s]*)?@"
+)
+_URL_QUERY_SECRET_RE = re.compile(
+    r"(?i)([?&#](?:api[_-]?key|access[_-]?token|auth[_-]?token|refresh[_-]?token|"
+    r"client[_-]?secret|password|token|secret)=)[^&#\s]+"
+)
+_NAMED_SECRET_RE = re.compile(
+    r"(?i)(\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|refresh[_-]?token|"
+    r"client[_-]?secret|password|token|secret|authorization)"
+    r"\b\s*[:=]\s*(?:Bearer\s+)?[\"']?)[^\"'\s,}&]+"
+)
+_EMAIL_ADDRESS_RE = re.compile(
+    r"\b[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b"
+)
+
+
+def _redact_stream_error(value: object) -> str:
+    text = str(value)
+    text = _URL_CREDENTIAL_RE.sub(r"\1***@", text)
+    text = _URL_QUERY_SECRET_RE.sub(r"\1***", text)
+    text = _NAMED_SECRET_RE.sub(r"\1***", text)
+    return _EMAIL_ADDRESS_RE.sub(r"***@\1", text)
+
+
+def _json_safe_stream_value(value: Any, _seen: set[int] | None = None) -> Any:
+    if value is None or isinstance(value, (bool, int, str)):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else 0.0
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if _seen is None:
+        _seen = set()
+    if isinstance(value, dict):
+        value_id = id(value)
+        if value_id in _seen:
+            return "[Circular]"
+        _seen.add(value_id)
+        try:
+            return {
+                str(key): _json_safe_stream_value(item, _seen)
+                for key, item in value.items()
+            }
+        finally:
+            _seen.remove(value_id)
+    if isinstance(value, (set, frozenset)):
+        value_id = id(value)
+        if value_id in _seen:
+            return "[Circular]"
+        _seen.add(value_id)
+        try:
+            return [
+                _json_safe_stream_value(item, _seen)
+                for item in sorted(
+                    value,
+                    key=lambda item: (type(item).__name__, repr(item)),
+                )
+            ]
+        finally:
+            _seen.remove(value_id)
+    if isinstance(value, (list, tuple)):
+        value_id = id(value)
+        if value_id in _seen:
+            return "[Circular]"
+        _seen.add(value_id)
+        try:
+            return [_json_safe_stream_value(item, _seen) for item in value]
+        finally:
+            _seen.remove(value_id)
+    return str(value)
 
 
 class SessionStream:
@@ -65,10 +138,11 @@ class SessionStream:
         if not conns:
             return
 
+        safe_message = _json_safe_stream_value(message)
         stale: list[WebSocket] = []
-        for ws in conns:
+        for ws in list(conns):
             try:
-                await ws.send_json(message)
+                await ws.send_json(safe_message)
             except Exception:
                 stale.append(ws)
 
@@ -78,7 +152,7 @@ class SessionStream:
                 conns.remove(ws)
             except ValueError:
                 pass
-        if not conns:
+        if not conns and self._connections.get(session_id) is conns:
             del self._connections[session_id]
 
 
@@ -108,4 +182,13 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
         while True:
             await websocket.receive_text()  # keep alive
     except WebSocketDisconnect:
+        return
+    except Exception as exc:
+        logger.warning(
+            "Session websocket failed for session %s: %s",
+            session_id,
+            _redact_stream_error(exc),
+        )
+        raise
+    finally:
         await session_stream.disconnect(session_id, websocket)

@@ -16,14 +16,14 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Codey — The coding agent that understands your codebase",
+  title: "Codey — The autonomous repo operator",
   description:
-    "Codey analyzes your codebase as a living network. Every line it writes, it knows exactly where that line sits — and what breaking it would cost.",
-  keywords: ["AI", "coding", "structural analysis", "developer tools", "coding agent"],
+    "Codey runs continuous repo management across scan, bug repair, CI rescue, security passes, dependency upkeep, docs, and release blockers.",
+  keywords: ["repo management", "autonomous repo operator", "CI rescue", "security automation", "dependency maintenance"],
   openGraph: {
-    title: "Codey — The coding agent that understands your codebase",
+    title: "Codey — The autonomous repo operator",
     description:
-      "Codey analyzes your codebase as a living network. Every line it writes, it knows exactly where that line sits — and what breaking it would cost.",
+      "Codey runs continuous repo management across scan, bug repair, CI rescue, security passes, dependency upkeep, docs, and release blockers.",
     type: "website",
   },
 };

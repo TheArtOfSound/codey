@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 
 from fastapi import HTTPException, Request, Response, status
 
+from codey.saas.auth.cookies import SESSION_COOKIE_NAME
+
 # ---------------------------------------------------------------------------
 # Default rate-limit tiers
 # ---------------------------------------------------------------------------
@@ -16,6 +18,17 @@ DEFAULT_LIMITS: dict[str, dict] = {
     "session_create": {"max_requests": 20, "window_seconds": 60 * 60},
     "file_upload": {"max_requests": 10, "window_seconds": 60 * 60},
 }
+_MAX_LIMIT_VALUE = 1_000_000
+
+
+def _coerce_limit_int(value: object, default: int) -> int:
+    if isinstance(value, bool):
+        return default
+    try:
+        parsed = int(value)
+    except (OverflowError, TypeError, ValueError):
+        return default
+    return min(_MAX_LIMIT_VALUE, max(1, parsed))
 
 
 # ---------------------------------------------------------------------------
@@ -30,6 +43,7 @@ class _Bucket:
     tokens: float
     max_tokens: int
     refill_rate: float  # tokens per second
+    stale_after_seconds: float
     last_refill: float = field(default_factory=time.monotonic)
 
     def refill(self) -> None:
@@ -50,6 +64,9 @@ class _Bucket:
         self.refill()
         return int(self.tokens)
 
+    def is_stale(self, now: float) -> bool:
+        return (now - self.last_refill) >= self.stale_after_seconds
+
 
 class RateLimiter:
     """In-memory token-bucket rate limiter.
@@ -58,10 +75,17 @@ class RateLimiter:
     for Redis (e.g. via ``aioredis``).  The public interface stays identical.
     """
 
-    def __init__(self, limits: dict[str, dict] | None = None) -> None:
+    def __init__(
+        self,
+        limits: dict[str, dict] | None = None,
+        *,
+        prune_interval_seconds: float = 60.0,
+    ) -> None:
         self._limits: dict[str, dict] = limits or DEFAULT_LIMITS
         # Composite key: ``"{category}:{key}"`` -> Bucket
         self._buckets: dict[str, _Bucket] = {}
+        self._prune_interval_seconds = max(prune_interval_seconds, 0.0)
+        self._last_prune = time.monotonic()
 
     # ------------------------------------------------------------------
     # Public API
@@ -82,20 +106,35 @@ class RateLimiter:
     # ------------------------------------------------------------------
 
     def _get_or_create(self, key: str, category: str) -> _Bucket:
+        self._maybe_prune()
         composite = f"{category}:{key}"
         if composite not in self._buckets:
             cfg = self._limits.get(category)
             if cfg is None:
                 raise ValueError(f"Unknown rate-limit category: {category!r}")
-            max_requests: int = cfg["max_requests"]
-            window_seconds: int = cfg["window_seconds"]
+            max_requests = _coerce_limit_int(cfg.get("max_requests"), 1)
+            window_seconds = _coerce_limit_int(cfg.get("window_seconds"), 60)
             refill_rate = max_requests / window_seconds
             self._buckets[composite] = _Bucket(
                 tokens=float(max_requests),
                 max_tokens=max_requests,
                 refill_rate=refill_rate,
+                stale_after_seconds=float(window_seconds),
             )
         return self._buckets[composite]
+
+    def _maybe_prune(self) -> None:
+        now = time.monotonic()
+        if (now - self._last_prune) < self._prune_interval_seconds:
+            return
+        self._last_prune = now
+        stale_keys = [
+            composite
+            for composite, bucket in self._buckets.items()
+            if bucket.is_stale(now)
+        ]
+        for composite in stale_keys:
+            self._buckets.pop(composite, None)
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +147,35 @@ _limiter = RateLimiter()
 def get_rate_limiter() -> RateLimiter:
     """Return the module-level :class:`RateLimiter` singleton."""
     return _limiter
+
+
+def _authenticated_rate_limit_key(request: Request) -> str | None:
+    auth_header = request.headers.get("authorization", "")
+    candidates: list[object] = []
+    if isinstance(auth_header, str):
+        auth_parts = auth_header.strip().split(None, 1)
+        if len(auth_parts) == 2 and auth_parts[0].lower() == "bearer":
+            candidates.append(auth_parts[1])
+    candidates.append(request.cookies.get(SESSION_COOKIE_NAME))
+
+    try:
+        from codey.saas.auth.jwt import decode_access_token, normalize_access_token_candidate
+    except Exception:
+        return None
+
+    for candidate in candidates:
+        normalized = normalize_access_token_candidate(candidate)
+        if normalized is None:
+            continue
+        try:
+            payload = decode_access_token(normalized)
+        except Exception:
+            continue
+        subject = normalize_access_token_candidate(payload.get("sub"))
+        if subject is not None:
+            return subject
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -137,42 +205,33 @@ def rate_limit(category: str):
         limiter = get_rate_limiter()
 
         # Determine rate-limit key: prefer authenticated user, fall back to IP.
-        key: str | None = None
-        auth_header = request.headers.get("authorization", "")
-        if auth_header.startswith("Bearer "):
-            # Lightweight JWT peek — import lazily to avoid circular deps.
-            try:
-                from codey.saas.auth.jwt import decode_access_token
-
-                payload = decode_access_token(auth_header.split(" ", 1)[1])
-                key = payload.get("sub")
-            except Exception:
-                pass  # token invalid; fall through to IP-based limiting
-
+        key = _authenticated_rate_limit_key(request)
         if key is None:
             key = request.client.host if request.client else "unknown"
 
         cfg = limiter._limits.get(category)
         if cfg is None:
             raise ValueError(f"Unknown rate-limit category: {category!r}")
+        max_requests = _coerce_limit_int(cfg.get("max_requests"), 1)
+        window_seconds = _coerce_limit_int(cfg.get("window_seconds"), 60)
 
         allowed = await limiter.check(key, category)
         remaining = await limiter.get_remaining(key, category)
 
         # Set informational headers regardless of outcome.
-        response.headers["X-RateLimit-Limit"] = str(cfg["max_requests"])
+        response.headers["X-RateLimit-Limit"] = str(max_requests)
         response.headers["X-RateLimit-Remaining"] = str(remaining)
-        response.headers["X-RateLimit-Reset"] = str(cfg["window_seconds"])
+        response.headers["X-RateLimit-Reset"] = str(window_seconds)
 
         if not allowed:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail=f"Rate limit exceeded for {category}. Try again later.",
                 headers={
-                    "X-RateLimit-Limit": str(cfg["max_requests"]),
+                    "X-RateLimit-Limit": str(max_requests),
                     "X-RateLimit-Remaining": "0",
-                    "X-RateLimit-Reset": str(cfg["window_seconds"]),
-                    "Retry-After": str(cfg["window_seconds"]),
+                    "X-RateLimit-Reset": str(window_seconds),
+                    "Retry-After": str(window_seconds),
                 },
             )
 

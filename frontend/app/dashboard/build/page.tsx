@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
+import { getWsBaseUrl } from "@/lib/runtime-config";
 import {
   Rocket,
   Server,
@@ -529,16 +530,8 @@ export default function BuildPage() {
         wsRef.current.close();
       }
 
-      const token =
-        typeof window !== "undefined"
-          ? localStorage.getItem("codey_token")
-          : null;
-
-      const wsBase =
-        process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000";
-      const url = `${wsBase}/build/${pid}/stream${
-        token ? `?token=${encodeURIComponent(token)}` : ""
-      }`;
+      const wsBase = getWsBaseUrl();
+      const url = `${wsBase}/build/${pid}/stream`;
 
       const ws = new WebSocket(url);
       wsRef.current = ws;

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import sqlite3
 from datetime import datetime, timezone
 
@@ -27,6 +28,28 @@ CREATE TABLE IF NOT EXISTS autonomous_actions (
     rolled_back INTEGER DEFAULT 0
 );
 """
+
+
+def _coerce_recent_limit(value: object, default: int = 20, maximum: int = 1000) -> int:
+    if isinstance(value, bool):
+        return default
+    try:
+        parsed = int(value)
+    except (OverflowError, TypeError, ValueError):
+        return default
+    if parsed < 1:
+        return default
+    return min(parsed, maximum)
+
+
+def _coerce_audit_float(value: object, default: float = 0.0) -> float:
+    if isinstance(value, bool):
+        return default
+    try:
+        parsed = float(value)
+    except (OverflowError, TypeError, ValueError):
+        return default
+    return parsed if math.isfinite(parsed) else default
 
 
 class AuditDatabase:
@@ -90,14 +113,14 @@ class AuditDatabase:
                 timestamp,
                 trigger_condition,
                 component_affected,
-                stress_before,
-                stress_after,
-                kappa_before,
-                kappa_after,
-                sigma_before,
-                sigma_after,
-                es_before,
-                es_after,
+                _coerce_audit_float(stress_before),
+                _coerce_audit_float(stress_after),
+                _coerce_audit_float(kappa_before),
+                _coerce_audit_float(kappa_after),
+                _coerce_audit_float(sigma_before),
+                _coerce_audit_float(sigma_after),
+                _coerce_audit_float(es_before),
+                _coerce_audit_float(es_after),
                 change_diff,
                 test_result,
                 1 if rolled_back else 0,
@@ -120,6 +143,7 @@ class AuditDatabase:
 
     def get_recent(self, limit: int = 20) -> list[dict]:
         """Return the most recent autonomous actions, newest first."""
+        limit = _coerce_recent_limit(limit)
         cursor = self._conn.execute(
             "SELECT * FROM autonomous_actions ORDER BY id DESC LIMIT ?",
             (limit,),

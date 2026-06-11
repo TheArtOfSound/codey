@@ -19,8 +19,8 @@ interface AuthState {
   loading: boolean;
   login: (email: string, password: string) => Promise<User>;
   signup: (email: string, password: string, name?: string) => Promise<User>;
-  loginWithGitHub: (code: string) => Promise<User>;
-  loginWithGoogle: (code: string) => Promise<User>;
+  loginWithGitHub: (code: string, state: string) => Promise<User>;
+  loginWithGoogle: (code: string, state: string) => Promise<User>;
   logout: () => void;
   refreshUser: () => Promise<void>;
 }
@@ -45,25 +45,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Hydrate auth state from localStorage on mount
+  // Hydrate auth state from the session cookie on mount.
   useEffect(() => {
-    const stored = api.getToken();
-    if (stored) {
-      setToken(stored);
-      api.getMe()
-        .then((me) => {
-          setUser(me);
-        })
-        .catch(() => {
-          api.setToken(null);
-          setToken(null);
-          setUser(null);
-        })
-        .finally(() => setLoading(false));
-    } else {
-      setLoading(false);
-    }
-  }, []);
+    refreshUser().finally(() => setLoading(false));
+  }, [refreshUser]);
 
   const login = useCallback(async (email: string, password: string) => {
     const result = await api.login(email, password);
@@ -79,15 +64,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return result.user;
   }, []);
 
-  const loginWithGitHub = useCallback(async (code: string) => {
-    const result = await api.loginWithGitHub(code);
+  const loginWithGitHub = useCallback(async (code: string, state: string) => {
+    const result = await api.loginWithGitHub(code, state);
     setToken(result.token);
     setUser(result.user);
     return result.user;
   }, []);
 
-  const loginWithGoogle = useCallback(async (code: string) => {
-    const result = await api.loginWithGoogle(code);
+  const loginWithGoogle = useCallback(async (code: string, state: string) => {
+    const result = await api.loginWithGoogle(code, state);
     setToken(result.token);
     setUser(result.user);
     return result.user;

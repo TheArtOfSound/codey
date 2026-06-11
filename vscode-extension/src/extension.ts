@@ -79,7 +79,7 @@ class CodeyInlineCompletionProvider implements vscode.InlineCompletionItemProvid
 
       if (!resp.ok || token.isCancellationRequested) return undefined;
 
-      const data = await resp.json();
+      const data = await resp.json() as { completion?: string };
       let completion = data.completion || '';
 
       // Clean up — only take meaningful completion lines
@@ -151,7 +151,7 @@ async function callApi(endpoint: string, body?: object): Promise<any> {
     });
 
     if (!resp.ok) {
-      const err = await resp.json().catch(() => ({ detail: 'Request failed' }));
+      const err = await resp.json().catch(() => ({ detail: 'Request failed' })) as { detail?: string };
       throw new Error(err.detail || `HTTP ${resp.status}`);
     }
 
