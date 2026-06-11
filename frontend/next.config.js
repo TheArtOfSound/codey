@@ -1,15 +1,20 @@
 /** @type {import('next').NextConfig} */
+const isStaticExport =
+  process.env.NEXT_PUBLIC_STATIC_EXPORT === "true" ||
+  process.env.NEXT_PUBLIC_GITHUB_PAGES === "true";
+
 const isGitHubPages = process.env.NEXT_PUBLIC_GITHUB_PAGES === "true";
 const repoBasePath = "/codey";
 
+/** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  output: isGitHubPages ? "export" : undefined,
+  output: isStaticExport ? "export" : undefined,
   basePath: isGitHubPages ? repoBasePath : undefined,
   assetPrefix: isGitHubPages ? `${repoBasePath}/` : undefined,
-  trailingSlash: isGitHubPages ? true : undefined,
+  trailingSlash: isStaticExport ? true : undefined,
   images: {
-    unoptimized: isGitHubPages,
+    unoptimized: isStaticExport,
     remotePatterns: [
       {
         protocol: "https",
@@ -19,7 +24,7 @@ const nextConfig = {
   },
 };
 
-if (!isGitHubPages) {
+if (!isStaticExport) {
   nextConfig.rewrites = async function rewrites() {
     const apiUrl =
       process.env.NEXT_SERVER_API_URL ||
