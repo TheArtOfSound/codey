@@ -151,6 +151,13 @@ def _parse_generated_file_content(value: object) -> str:
     matches = re.findall(r"```[^\n\r]*\r?\n(.*?)```", content, re.DOTALL)
     if matches:
         content = max(matches, key=len).rstrip()
+    else:
+        _stripped = content.strip()
+        if _stripped.startswith("```"):
+            _lines = _stripped.splitlines()[1:]
+            if _lines and _lines[-1].strip().startswith("```"):
+                _lines = _lines[:-1]
+            content = chr(10).join(_lines).strip()
     if not content.strip():
         raise TypeError("Model returned empty generated file content")
     return content

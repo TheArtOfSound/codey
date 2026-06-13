@@ -149,6 +149,7 @@ class EmailService:
     """SendGrid-backed transactional email service for Codey."""
 
     def __init__(self) -> None:
+        self._resend_key = _coerce_non_empty_email_secret(settings.resend_api_key)
         api_key = _coerce_non_empty_email_secret(settings.sendgrid_api_key)
         self._client = (
             sendgrid.SendGridAPIClient(api_key=api_key) if api_key else None
@@ -166,6 +167,29 @@ class EmailService:
     async def send_email(self, to_email: str, subject: str, html_content: str) -> bool:
         """Send a single transactional email. Returns True on success."""
         safe_to_email = _redact_email_address(to_email)
+        if self._resend_key is not None:
+            if self._from_email is None:
+                logger.info("Email sender not configured; skipping email to %s", safe_to_email)
+                return False
+            _from_addr = getattr(self._from_email, "email", None) or ""
+            _from_name = getattr(self._from_email, "name", None)
+            _sender = f"{_from_name} <{_from_addr}>" if _from_name else _from_addr
+            try:
+                import httpx
+                async with httpx.AsyncClient(timeout=15.0) as _hc:
+                    _resp = await _hc.post(
+                        "https://api.resend.com/emails",
+                        headers={"Authorization": f"Bearer {self._resend_key}", "Content-Type": "application/json"},
+                        json={"from": _sender, "to": [to_email], "subject": subject, "html": html_content},
+                    )
+                if _resp.status_code >= 400:
+                    logger.error("Resend returned %s for %s: %s", _resp.status_code, safe_to_email, _redact_email_error(_resp.text))
+                    return False
+                logger.info("Email sent (Resend) to %s subject: %s", safe_to_email, subject)
+                return True
+            except Exception as exc:
+                logger.warning("Failed to send email (Resend) to %s: %s", safe_to_email, _redact_email_error(exc))
+                return False
         if self._client is None:
             logger.info("SendGrid not configured; skipping email to %s", safe_to_email)
             return False
