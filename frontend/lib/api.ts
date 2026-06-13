@@ -427,6 +427,31 @@ class ApiClient {
     return this.request<User>("/users/me");
   }
 
+  async getByok(): Promise<{
+    configured: boolean;
+    provider: string | null;
+    model: string | null;
+    has_key: boolean;
+    allowed_providers: string[];
+  }> {
+    return this.request("/users/me/byok");
+  }
+
+  async setByok(
+    provider: string,
+    apiKey: string,
+    model?: string,
+  ): Promise<{ configured: boolean; provider: string | null; model: string | null; has_key: boolean }> {
+    return this.request("/users/me/byok", {
+      method: "PUT",
+      body: JSON.stringify({ provider, api_key: apiKey, model: model || null }),
+    });
+  }
+
+  async clearByok(): Promise<void> {
+    return this.request<void>("/users/me/byok", { method: "DELETE" });
+  }
+
   async updateProfile(data: { email?: string; name?: string }): Promise<User> {
     return this.request<User>("/users/me", {
       method: "PATCH",
