@@ -192,7 +192,7 @@ def _build_referral_link(frontend_origin: object, user_id: object) -> str:
 
 @router.get("", response_model=ReferralStatsResponse)
 async def get_referral_stats(
-    request: Request | None = None,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ReferralStatsResponse:

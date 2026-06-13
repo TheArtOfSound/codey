@@ -576,7 +576,7 @@ async def restore_project_version(
 
 @router.get("/exports", response_model=list[ExportHistoryResponse])
 async def list_exports(
-    request: Request | None = None,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[ExportHistoryResponse]:
