@@ -33,6 +33,22 @@ class User(Base):
     password_hash: Mapped[Optional[str]] = mapped_column(String(255))
     github_id: Mapped[Optional[str]] = mapped_column(String(100))
     _github_token_ciphertext: Mapped[Optional[str]] = mapped_column("github_token", Text)
+    byok_provider: Mapped[Optional[str]] = mapped_column(String(50))
+    byok_model: Mapped[Optional[str]] = mapped_column(String(120))
+    _byok_api_key_ciphertext: Mapped[Optional[str]] = mapped_column("byok_api_key", Text)
+
+    @property
+    def byok_api_key(self) -> Optional[str]:
+        if not self._byok_api_key_ciphertext:
+            return None
+        try:
+            return decrypt_token(self._byok_api_key_ciphertext)
+        except Exception:
+            return None
+
+    @byok_api_key.setter
+    def byok_api_key(self, value: Optional[str]) -> None:
+        self._byok_api_key_ciphertext = encrypt_token(value) if value else None
     google_id: Mapped[Optional[str]] = mapped_column(String(100))
     name: Mapped[Optional[str]] = mapped_column(String(255))
     avatar_url: Mapped[Optional[str]] = mapped_column(Text)

@@ -29,10 +29,18 @@ from codey.saas.build_mode.engine import BuildEngine
 from codey.saas.build_mode.path_utils import normalize_plan_file_path
 from codey.saas.credits.service import CreditService, InsufficientCreditsError, CREDIT_COSTS
 from codey.saas.database import get_db
-from codey.saas.intelligence.providers import call_model, resolve_model
+from codey.saas.intelligence.providers import call_model, resolve_model, set_byok_override
 from codey.saas.models import BuildCheckpoint, BuildFile, BuildProject, User
 
-router = APIRouter(prefix="/build", tags=["build"])
+async def _apply_byok(current_user: User = Depends(get_current_user)) -> None:
+    """Apply the BYOK override for this request, if any."""
+    try:
+        set_byok_override(current_user.byok_provider, current_user.byok_api_key, current_user.byok_model)
+    except Exception:
+        pass
+
+
+router = APIRouter(prefix="/build", tags=["build"], dependencies=[Depends(_apply_byok)])
 
 _URL_CREDENTIAL_RE = re.compile(
     r"([A-Za-z][A-Za-z0-9+.-]*://)[^/@\s]+(?::[^/@\s]*)?@"

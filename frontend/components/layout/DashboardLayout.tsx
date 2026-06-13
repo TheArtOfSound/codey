@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import {
+  KeyRound,
   BarChart3,
   Code,
   Network,
@@ -274,6 +275,15 @@ export default function DashboardLayout({
                         >
                           <Settings className="h-4 w-4" />
                           Settings
+                        </Link>
+                        <Link
+                          href="/settings/llm"
+                          prefetch={false}
+                          onClick={() => setUserMenuOpen(false)}
+                          className="flex items-center gap-3 px-4 py-2 text-sm text-codey-text-dim hover:bg-codey-card-hover hover:text-codey-text"
+                        >
+                          <KeyRound className="h-4 w-4" />
+                          API Keys
                         </Link>
                         <Link
                           href="/settings/billing"

@@ -664,6 +664,66 @@ async def connect_github_token(
     return _user_to_profile_response(current_user)
 
 
+class BYOKRequest(BaseModel):
+    provider: str
+    api_key: str
+    model: str | None = None
+
+
+_BYOK_ALLOWED_PROVIDERS = {
+    "openai", "groq", "openrouter", "deepseek", "together",
+    "fireworks", "cerebras", "mistral", "gemini",
+}
+
+
+def _byok_status(user: User) -> dict:
+    return {
+        "configured": bool(user.byok_provider and user._byok_api_key_ciphertext),
+        "provider": user.byok_provider,
+        "model": user.byok_model,
+        "has_key": bool(user._byok_api_key_ciphertext),
+        "allowed_providers": sorted(_BYOK_ALLOWED_PROVIDERS),
+    }
+
+
+@router.get("/me/byok")
+async def get_byok(current_user: User = Depends(get_current_user)) -> dict:
+    return _byok_status(current_user)
+
+
+@router.put("/me/byok")
+async def set_byok(
+    body: BYOKRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    provider = (body.provider or "").strip().lower()
+    if provider not in _BYOK_ALLOWED_PROVIDERS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported provider. Allowed: %s" % ", ".join(sorted(_BYOK_ALLOWED_PROVIDERS)),
+        )
+    key = (body.api_key or "").strip()
+    if not key:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="api_key is required")
+    current_user.byok_provider = provider
+    current_user.byok_api_key = key
+    current_user.byok_model = (body.model or "").strip() or None
+    await db.commit()
+    return _byok_status(current_user)
+
+
+@router.delete("/me/byok", status_code=status.HTTP_204_NO_CONTENT)
+async def clear_byok(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    current_user.byok_provider = None
+    current_user.byok_api_key = None
+    current_user.byok_model = None
+    await db.commit()
+
+
 @router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_me(
     body: DeleteUserRequest,
