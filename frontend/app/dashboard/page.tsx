@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth";
 import { api, type Session, type Repo } from "@/lib/api";
+import { repoWorkLanes } from "@/lib/repo-work";
 import {
   Code,
   Upload,
@@ -92,7 +93,7 @@ function QuickAction({
     return <button onClick={onClick} className="text-left">{inner}</button>;
   }
 
-  return <Link href={href || "#"}>{inner}</Link>;
+  return <Link href={href || "#"} prefetch={false}>{inner}</Link>;
 }
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
@@ -105,32 +106,53 @@ export default function DashboardPage() {
   const [connectModalOpen, setConnectModalOpen] = useState(false);
   const [repoUrl, setRepoUrl] = useState("");
   const [connecting, setConnecting] = useState(false);
+  const [connectError, setConnectError] = useState<string | null>(null);
 
   useEffect(() => {
+    let active = true;
+
     async function load() {
       try {
         const [sessData, repoData] = await Promise.all([
           api.getSessions({ limit: 10 }),
           api.getRepos(),
         ]);
+        if (!active) {
+          return;
+        }
         setSessions(sessData.sessions);
         setRepos(repoData);
       } catch (err) {
-        console.error("Failed to load dashboard data:", err);
+        if (!active) {
+          return;
+        }
+        setSessions([]);
+        setRepos([]);
       } finally {
-        setLoading(false);
+        if (active) {
+          setLoading(false);
+        }
       }
     }
     load();
+
+    return () => {
+      active = false;
+    };
   }, []);
 
-  const totalCredits = user?.plan === "pro" ? 5000 : user?.plan === "team" ? 20000 : 500;
-  const usedCredits = totalCredits - (user?.credits_remaining ?? 0);
-  const usagePercent = Math.min(100, Math.round((usedCredits / totalCredits) * 100));
+  const monthlyCredits =
+    user?.plan === "team" ? 1500 : user?.plan === "pro" ? 400 : user?.plan === "starter" ? 100 : 10;
+  const usedCredits = Math.max(0, monthlyCredits - (user?.credits_remaining ?? 0));
+  const usagePercent = Math.min(
+    100,
+    Math.round((usedCredits / Math.max(monthlyCredits, 1)) * 100)
+  );
 
   async function handleConnectRepo() {
     if (!repoUrl.trim()) return;
     setConnecting(true);
+    setConnectError(null);
     try {
       const newRepo = await api.connectRepo({ github_url: repoUrl.trim() });
       setRepos((prev) => [...prev, newRepo]);
@@ -138,6 +160,8 @@ export default function DashboardPage() {
       setConnectModalOpen(false);
     } catch (err) {
       console.error("Failed to connect repo:", err);
+      const apiErr = err as { detail?: string };
+      setConnectError(apiErr.detail || "Failed to connect repository.");
     } finally {
       setConnecting(false);
     }
@@ -157,12 +181,12 @@ export default function DashboardPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-codey-text">
-            Welcome back{user?.email ? `, ${user.email.split("@")[0]}` : ""}
+            Repo control room{user?.email ? `, ${user.email.split("@")[0]}` : ""}
           </h1>
           <p className="mt-1 text-sm text-codey-text-dim">
             {sessions.length > 0
-              ? `You have ${sessions.filter((s) => s.status === "running").length} running session${sessions.filter((s) => s.status === "running").length !== 1 ? "s" : ""}`
-              : "Start your first session to see it here"}
+              ? `${sessions.filter((s) => s.status === "running").length} autonomous run${sessions.filter((s) => s.status === "running").length !== 1 ? "s are" : " is"} active across your queue`
+              : "Connect a repository or queue an intervention to start the operating loop"}
           </p>
         </div>
 
@@ -173,7 +197,7 @@ export default function DashboardPage() {
               <Zap className="h-3 w-3 text-codey-green" />
               Credits
             </span>
-            <Link href="/credits" className="text-codey-green hover:underline">
+            <Link href="/credits" prefetch={false} className="text-codey-green hover:underline">
               Need more?
             </Link>
           </div>
@@ -181,7 +205,7 @@ export default function DashboardPage() {
             <span className="text-lg font-bold text-codey-text">
               {user?.credits_remaining.toLocaleString()}
             </span>
-            <span className="text-xs text-codey-text-muted">/ {totalCredits.toLocaleString()}</span>
+            <span className="text-xs text-codey-text-muted">/ {monthlyCredits.toLocaleString()}</span>
           </div>
           <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-codey-card-hover">
             <div
@@ -203,35 +227,61 @@ export default function DashboardPage() {
         <QuickAction
           href="/dashboard/prompt"
           icon={Code}
-          title="Start a new prompt"
-          description="Describe what you need, get production code"
+          title="Queue intervention"
+          description="Write a maintenance brief against a repository"
         />
         <QuickAction
           href="/dashboard/analyze"
           icon={Upload}
-          title="Upload & analyze"
-          description="Get structural health analysis for any codebase"
+          title="Run repo scan"
+          description="Upload a codebase snapshot and surface risk"
         />
         <QuickAction
           icon={GitBranch}
           title="Connect GitHub repo"
-          description="Link a repository for continuous analysis"
+          description="Add a repository to the managed fleet"
           onClick={() => setConnectModalOpen(true)}
         />
         <QuickAction
           href="/dashboard/autonomous"
           icon={Bot}
-          title="Autonomous activity"
-          description="Monitor and manage auto-fix sessions"
+          title="Review autopilot"
+          description="Tune policies, queue depth, and execution activity"
         />
+      </div>
+
+      <div className="rounded-xl border border-codey-border bg-codey-card">
+        <div className="border-b border-codey-border px-5 py-4">
+          <h2 className="text-sm font-semibold text-codey-text">Repo Work Coverage</h2>
+          <p className="mt-1 text-xs text-codey-text-dim">
+            Codey is scoped around the full repository lifecycle, not just ad hoc prompts.
+          </p>
+        </div>
+        <div className="grid gap-0 md:grid-cols-2 xl:grid-cols-3">
+          {repoWorkLanes.map((lane) => (
+            <div
+              key={lane.id}
+              className="border-b border-codey-border/50 px-5 py-4 md:border-r xl:[&:nth-child(3n)]:border-r-0"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-medium text-codey-text">{lane.label}</p>
+                <span className="rounded-full border border-codey-border bg-codey-bg px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-codey-text-muted">
+                  {lane.modeLabel}
+                </span>
+              </div>
+              <p className="mt-2 text-sm leading-6 text-codey-text-dim">{lane.summary}</p>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* ── Recent Sessions ──────────────────────────────────────────── */}
       <div className="rounded-xl border border-codey-border bg-codey-card">
         <div className="flex items-center justify-between border-b border-codey-border px-5 py-4">
-          <h2 className="text-sm font-semibold text-codey-text">Recent Sessions</h2>
+          <h2 className="text-sm font-semibold text-codey-text">Recent Runs</h2>
           <Link
             href="/dashboard/sessions"
+            prefetch={false}
             className="flex items-center gap-1 text-xs text-codey-green hover:underline"
           >
             View all <ChevronRight className="h-3 w-3" />
@@ -240,14 +290,14 @@ export default function DashboardPage() {
 
         {sessions.length === 0 ? (
           <div className="px-5 py-12 text-center text-sm text-codey-text-dim">
-            No sessions yet. Start your first prompt to see activity here.
+            No runs yet. Queue a repository intervention to start building history.
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead>
                 <tr className="border-b border-codey-border text-xs text-codey-text-muted">
-                  <th className="px-5 py-3 font-medium">Prompt</th>
+                  <th className="px-5 py-3 font-medium">Work Item</th>
                   <th className="px-5 py-3 font-medium">Status</th>
                   <th className="hidden px-5 py-3 font-medium md:table-cell">Credits</th>
                   <th className="hidden px-5 py-3 font-medium lg:table-cell">Health</th>
@@ -265,9 +315,10 @@ export default function DashboardPage() {
                       <td className="max-w-[200px] truncate px-5 py-3 text-codey-text">
                         <Link
                           href={`/dashboard/sessions?id=${session.id}`}
+                          prefetch={false}
                           className="hover:text-codey-green transition-colors"
                         >
-                          {session.prompt || "Untitled session"}
+                          {session.prompt || "Untitled intervention"}
                         </Link>
                       </td>
                       <td className="px-5 py-3">
@@ -307,7 +358,7 @@ export default function DashboardPage() {
       {/* ── Connected Repos ──────────────────────────────────────────── */}
       <div className="rounded-xl border border-codey-border bg-codey-card">
         <div className="flex items-center justify-between border-b border-codey-border px-5 py-4">
-          <h2 className="text-sm font-semibold text-codey-text">Connected Repos</h2>
+          <h2 className="text-sm font-semibold text-codey-text">Repository Fleet</h2>
           <button
             onClick={() => setConnectModalOpen(true)}
             className="text-xs text-codey-green hover:underline"
@@ -318,7 +369,7 @@ export default function DashboardPage() {
 
         {repos.length === 0 ? (
           <div className="px-5 py-12 text-center text-sm text-codey-text-dim">
-            No repos connected. Link a GitHub repository to enable continuous analysis.
+            No repositories are under management yet. Connect GitHub repos to enable continuous scans and autonomous work.
           </div>
         ) : (
           <div className="divide-y divide-codey-border/50">
@@ -367,16 +418,27 @@ export default function DashboardPage() {
           <div className="relative z-10 w-full max-w-md animate-fade-in rounded-2xl border border-codey-border bg-codey-card p-6 shadow-2xl">
             <h3 className="text-lg font-semibold text-codey-text">Connect GitHub Repository</h3>
             <p className="mt-1 text-sm text-codey-text-dim">
-              Paste a GitHub repo URL to connect it for analysis and autonomous monitoring.
+              Paste a GitHub repo URL to add it to Codey&apos;s managed fleet for scanning, queueing, and autopilot runs.
             </p>
+            {!user?.github_connected && (
+              <p className="mt-2 text-xs text-codey-text-muted">
+                Private repositories require GitHub access from Settings.
+              </p>
+            )}
 
             <input
               type="text"
               value={repoUrl}
-              onChange={(e) => setRepoUrl(e.target.value)}
+              onChange={(e) => {
+                setRepoUrl(e.target.value);
+                setConnectError(null);
+              }}
               placeholder="https://github.com/user/repo"
               className="mt-4 w-full rounded-lg border border-codey-border bg-codey-bg px-4 py-3 text-sm text-codey-text placeholder:text-codey-text-muted focus:border-codey-green focus:outline-none focus:ring-1 focus:ring-codey-green/30"
             />
+            {connectError && (
+              <p className="mt-3 text-sm text-codey-red">{connectError}</p>
+            )}
 
             <div className="mt-5 flex justify-end gap-3">
               <button

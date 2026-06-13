@@ -3,7 +3,7 @@
   "displayName": "Codey — Structural Coding Intelligence",
   "description": "The coding AI that understands your codebase as a living network. Generate code, analyze structure, monitor health.",
   "version": "1.0.0",
-  "publisher": "codey-qira",
+  "publisher": "CodeybyQiraLLCcodey-qira",
   "engines": {
     "vscode": "^1.85.0"
   },

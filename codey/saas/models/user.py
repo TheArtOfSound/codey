@@ -1,4 +1,5 @@
 
+import math
 import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
@@ -7,7 +8,9 @@ from sqlalchemy import Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from codey.saas.billing.plans import PLANS
 from codey.saas.models.base import Base
+from codey.saas.security.encryption import decrypt_token, encrypt_token
 
 if TYPE_CHECKING:
     from codey.saas.models.coding_session import CodingSession
@@ -29,7 +32,7 @@ class User(Base):
     )
     password_hash: Mapped[Optional[str]] = mapped_column(String(255))
     github_id: Mapped[Optional[str]] = mapped_column(String(100))
-    github_token: Mapped[Optional[str]] = mapped_column(Text)
+    _github_token_ciphertext: Mapped[Optional[str]] = mapped_column("github_token", Text)
     google_id: Mapped[Optional[str]] = mapped_column(String(100))
     name: Mapped[Optional[str]] = mapped_column(String(255))
     avatar_url: Mapped[Optional[str]] = mapped_column(Text)
@@ -73,18 +76,104 @@ class User(Base):
 
     @property
     def total_credits(self) -> int:
-        return self.credits_remaining + self.topup_credits
+        return self._coerce_credit_value(self.credits_remaining) + self._coerce_credit_value(
+            self.topup_credits
+        )
+
+    @property
+    def github_token(self) -> Optional[str]:
+        if not self._github_token_ciphertext:
+            return None
+
+        try:
+            value = decrypt_token(self._github_token_ciphertext)
+        except Exception:
+            # Support legacy plaintext rows until they are overwritten.
+            value = self._github_token_ciphertext
+
+        if not isinstance(value, str):
+            return None
+
+        normalized = value.strip()
+        return normalized or None
+
+    @github_token.setter
+    def github_token(self, value: Optional[str]) -> None:
+        if not isinstance(value, str):
+            self._github_token_ciphertext = None
+            return
+
+        normalized = value.strip()
+        if not normalized:
+            self._github_token_ciphertext = None
+            return
+
+        self._github_token_ciphertext = encrypt_token(normalized)
 
     @property
     def plan_display_name(self) -> str:
-        plan_names = {
-            "free": "Free",
-            "pro": "Pro",
-            "team": "Team",
-            "enterprise": "Enterprise",
-        }
-        return plan_names.get(self.plan, self.plan.capitalize())
+        plan = self.plan
+        if not isinstance(plan, str):
+            return "Free"
+        normalized = plan.strip().lower()
+        if not normalized:
+            return "Free"
+        configured_name = PLANS.get(normalized, {}).get("name")
+        if isinstance(configured_name, str) and configured_name.strip():
+            return configured_name.strip()
+        return normalized.capitalize()
 
     @property
     def is_pro_or_above(self) -> bool:
-        return self.plan in ("pro", "team", "enterprise")
+        plan = self.plan
+        if not isinstance(plan, str):
+            return False
+
+        normalized = plan.strip().lower()
+        if not normalized:
+            return False
+
+        # Preserve legacy enterprise access until that tier is formalized in PLANS.
+        if normalized == "enterprise":
+            return True
+
+        features = PLANS.get(normalized, {}).get("features")
+        if not isinstance(features, dict):
+            return False
+
+        return self._coerce_feature_bool(features.get("autonomous_mode"), False)
+
+    @staticmethod
+    def _coerce_feature_bool(value: object, fallback: bool = False) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            normalized = float(value)
+            return bool(normalized) if math.isfinite(normalized) else fallback
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "1", "yes", "y", "on"}:
+                return True
+            if normalized in {"false", "0", "no", "n", "off", ""}:
+                return False
+        return fallback
+
+    @staticmethod
+    def _coerce_credit_value(value: object) -> int:
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip()
+            if not normalized:
+                return 0
+            try:
+                return int(normalized)
+            except ValueError:
+                return 0
+        return 0
+
+
+if not TYPE_CHECKING:
+    from codey.saas.models import coding_session as _coding_session  # noqa: F401
+    from codey.saas.models import credit_transaction as _credit_transaction  # noqa: F401
+    from codey.saas.models import repository as _repository  # noqa: F401

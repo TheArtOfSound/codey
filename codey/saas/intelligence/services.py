@@ -14,16 +14,33 @@ Covers all categories from the Codey Intelligence Services spec:
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import logging
 import os
 import re
-import subprocess
 import tempfile
 from typing import Any
-from uuid import uuid4
+from urllib.parse import quote, urlparse, urlunparse
 
-import httpx
+try:
+    import httpx
+except ModuleNotFoundError as exc:  # pragma: no cover - exercised via import hook
+    if exc.name != "httpx":
+        raise
+    _HTTPX_IMPORT_ERROR = exc
+
+    def _raise_missing_httpx(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError(
+            "httpx is required for intelligence service network calls"
+        ) from _HTTPX_IMPORT_ERROR
+
+    class _MissingHTTPX:
+        AsyncClient = staticmethod(_raise_missing_httpx)
+
+    httpx: Any = _MissingHTTPX()
+else:
+    _HTTPX_IMPORT_ERROR = None
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +106,303 @@ PROVIDERS: dict[str, dict[str, str]] = {
     },
 }
 
+_URL_CREDENTIAL_RE = re.compile(
+    r"([A-Za-z][A-Za-z0-9+.-]*://)[^/@\s]+(?::[^/@\s]*)?@"
+)
+_URL_QUERY_SECRET_RE = re.compile(
+    r"(?i)([?&](?:api[_-]?key|access[_-]?token|auth[_-]?token|"
+    r"refresh[_-]?token|client[_-]?secret|token|secret|password)=)[^&\s]+"
+)
+_NAMED_SECRET_RE = re.compile(
+    r"(?i)(\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|"
+    r"refresh[_-]?token|client[_-]?secret|token|secret|password|authorization)"
+    r"\b\s*[:=]\s*(?:Bearer\s+)?[\"']?)[^\"'\s,}&]+"
+)
+_EMAIL_ADDRESS_RE = re.compile(
+    r"\b[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b"
+)
+_SERVICE_DRAIN_TIMEOUT_SECONDS = 5.0
+
+
+def _redact_service_error(value: object) -> str:
+    text = str(value)
+    text = _URL_CREDENTIAL_RE.sub(r"\1***@", text)
+    text = _URL_QUERY_SECRET_RE.sub(r"\1***", text)
+    text = _NAMED_SECRET_RE.sub(r"\1***", text)
+    return _EMAIL_ADDRESS_RE.sub(r"***@\1", text)
+
+
+def _coerce_non_empty_service_secret(name: str) -> str | None:
+    value = os.getenv(name)
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if any(ord(char) < 32 or ord(char) == 127 for char in normalized):
+        return None
+    if any(char.isspace() for char in normalized):
+        return None
+    return normalized or None
+
+
+def _coerce_service_host_ip(
+    hostname: str,
+) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    try:
+        return ipaddress.ip_address(hostname)
+    except ValueError:
+        pass
+    if hostname.isdecimal():
+        numeric_host = int(hostname, 10)
+        if 0 <= numeric_host <= 0xFFFFFFFF:
+            try:
+                return ipaddress.ip_address(numeric_host)
+            except ValueError:
+                return None
+    return None
+
+
+def _coerce_obfuscated_service_ipv4(hostname: str) -> ipaddress.IPv4Address | None:
+    parts = hostname.split(".")
+    if not 1 <= len(parts) <= 4:
+        return None
+
+    values: list[int] = []
+    for part in parts:
+        if not part:
+            return None
+        base = 10
+        digits = part
+        if part.lower().startswith("0x"):
+            base = 16
+            digits = part[2:]
+        elif len(part) > 1 and part.startswith("0"):
+            base = 8
+        if not digits:
+            return None
+        try:
+            values.append(int(part, base))
+        except ValueError:
+            return None
+
+    if len(values) == 1:
+        if values[0] > 0xFFFFFFFF:
+            return None
+        address = values[0]
+    elif len(values) == 2:
+        if values[0] > 0xFF or values[1] > 0xFFFFFF:
+            return None
+        address = (values[0] << 24) | values[1]
+    elif len(values) == 3:
+        if values[0] > 0xFF or values[1] > 0xFF or values[2] > 0xFFFF:
+            return None
+        address = (values[0] << 24) | (values[1] << 16) | values[2]
+    else:
+        if any(value > 0xFF for value in values):
+            return None
+        address = (
+            (values[0] << 24)
+            | (values[1] << 16)
+            | (values[2] << 8)
+            | values[3]
+        )
+    return ipaddress.IPv4Address(address)
+
+
+def _coerce_service_webhook_url(name: str) -> str | None:
+    url = _coerce_non_empty_service_secret(name)
+    if not url:
+        return None
+
+    parsed = urlparse(url)
+    if (
+        parsed.scheme != "https"
+        or not parsed.netloc
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        return None
+
+    try:
+        port = parsed.port
+    except ValueError:
+        return None
+    if port is not None and port <= 0:
+        return None
+
+    hostname = (parsed.hostname or "").rstrip(".").lower()
+    if not hostname or hostname == "localhost" or hostname.endswith(".localhost"):
+        return None
+
+    host_ip = _coerce_service_host_ip(hostname)
+    if host_ip is None:
+        host_ip = _coerce_obfuscated_service_ipv4(hostname)
+    if host_ip is not None and (
+        host_ip.is_loopback
+        or host_ip.is_private
+        or host_ip.is_link_local
+        or host_ip.is_multicast
+        or host_ip.is_reserved
+        or host_ip.is_unspecified
+    ):
+        return None
+
+    return urlunparse(
+        (parsed.scheme, parsed.netloc, parsed.path, parsed.params, parsed.query, "")
+    )
+
+
+def _semgrep_extension(language: object) -> str:
+    if not isinstance(language, str):
+        return "py"
+    normalized = language.strip().lower()
+    if not normalized or any(
+        ord(char) < 32 or ord(char) == 127 for char in normalized
+    ):
+        return "py"
+    return _EXT_MAP.get(normalized, "py")
+
+
+def _require_httpx() -> None:
+    if _HTTPX_IMPORT_ERROR is not None:
+        raise RuntimeError(
+            "httpx is required for intelligence service network calls"
+        ) from _HTTPX_IMPORT_ERROR
+
+
+async def _terminate_service_process(
+    proc: asyncio.subprocess.Process,
+    process_name: str,
+) -> None:
+    if proc.returncode is not None:
+        return
+
+    try:
+        proc.kill()
+    except ProcessLookupError:
+        pass
+    except Exception as exc:
+        logger.warning(
+            "Failed to kill timed-out %s process: %s",
+            _redact_service_error(process_name),
+            _redact_service_error(exc),
+        )
+        return
+
+    try:
+        await asyncio.wait_for(
+            proc.communicate(),
+            timeout=_SERVICE_DRAIN_TIMEOUT_SECONDS,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Failed to drain timed-out %s process: %s",
+            _redact_service_error(process_name),
+            _redact_service_error(exc),
+        )
+
+
+def _decode_process_output(payload: object) -> str:
+    if isinstance(payload, bytes):
+        return payload.decode("utf-8", errors="replace")
+    if isinstance(payload, str):
+        return payload
+    return ""
+
+
+def _coerce_semgrep_text(value: object, default: str) -> str:
+    if not isinstance(value, str):
+        return default
+    normalized = value.strip()
+    return normalized or default
+
+
+def _coerce_semgrep_line(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if value > 0 else None
+
+
+def _normalize_semgrep_findings(payload: object) -> list[dict]:
+    if not isinstance(payload, list):
+        return []
+
+    normalized: list[dict] = []
+    for finding in payload:
+        if not isinstance(finding, dict):
+            continue
+        rule = finding.get("check_id")
+        if not isinstance(rule, str) or not rule.strip():
+            continue
+        extra = finding.get("extra")
+        if not isinstance(extra, dict):
+            extra = {}
+        start = finding.get("start")
+        if not isinstance(start, dict):
+            start = {}
+        severity = _coerce_semgrep_text(extra.get("severity"), "unknown")
+        message = _coerce_semgrep_text(extra.get("message"), "")
+        line = _coerce_semgrep_line(start.get("line"))
+        normalized.append(
+            {
+                "rule": rule.strip(),
+                "severity": severity,
+                "message": message,
+                "line": line,
+            }
+        )
+    return normalized
+
+
+def _coerce_dict_list(payload: object) -> list[dict]:
+    if not isinstance(payload, list):
+        return []
+    return [item for item in payload if isinstance(item, dict)]
+
+
+def _coerce_repository_url(payload: object) -> str | None:
+    if isinstance(payload, str):
+        return payload
+    if isinstance(payload, dict):
+        url = payload.get("url")
+        return url if isinstance(url, str) else None
+    return None
+
+
+def _coerce_pypi_home_page(info: dict) -> str | None:
+    home_page = info.get("home_page")
+    if isinstance(home_page, str) and home_page:
+        return home_page
+    project_url = info.get("project_url")
+    if isinstance(project_url, str) and project_url:
+        return project_url
+    project_urls = info.get("project_urls")
+    if isinstance(project_urls, dict):
+        for key in ("Homepage", "Home", "Source", "Repository"):
+            value = project_urls.get(key)
+            if isinstance(value, str) and value:
+                return value
+    return None
+
+
+def _coerce_llm_content(payload: object) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return None
+    first = choices[0]
+    if not isinstance(first, dict):
+        return None
+    message = first.get("message")
+    if not isinstance(message, dict):
+        return None
+    content = message.get("content")
+    return content if isinstance(content, str) else None
+
+
+def _quote_service_path_segment(value: object) -> str:
+    return quote(str(value), safe="")
+
 
 class IntelligenceServices:
     """Manages all external intelligence sources.
@@ -99,11 +413,22 @@ class IntelligenceServices:
     """
 
     def __init__(self, *, timeout: float = 30) -> None:
-        self._http = httpx.AsyncClient(timeout=timeout)
+        self._timeout = timeout
+        self._http_client: Any | None = None
+
+    @property
+    def _http(self) -> Any:
+        if self._http_client is None:
+            _require_httpx()
+            self._http_client = httpx.AsyncClient(timeout=self._timeout)
+        return self._http_client
 
     async def close(self) -> None:
         """Shut down the underlying HTTP client."""
-        await self._http.aclose()
+        http_client = self._http_client
+        self._http_client = None
+        if http_client is not None:
+            await http_client.aclose()
 
     # ------------------------------------------------------------------
     # SEARCH
@@ -113,7 +438,7 @@ class IntelligenceServices:
         self, query: str, *, max_results: int = 5
     ) -> list[dict] | None:
         """AI-optimised search via Tavily (1 000 searches/month free)."""
-        key = os.getenv("TAVILY_API_KEY")
+        key = _coerce_non_empty_service_secret("TAVILY_API_KEY")
         if not key:
             return None
         try:
@@ -122,16 +447,22 @@ class IntelligenceServices:
                 json={"api_key": key, "query": query, "max_results": max_results},
             )
             if resp.status_code == 200:
-                return resp.json().get("results", [])
-        except Exception:
-            logger.debug("Tavily search failed for %r", query, exc_info=True)
+                payload = resp.json()
+                results = payload.get("results", []) if isinstance(payload, dict) else []
+                return _coerce_dict_list(results)
+        except Exception as exc:
+            logger.debug(
+                "Tavily search failed for %r: %s",
+                _redact_service_error(query),
+                _redact_service_error(exc),
+            )
         return None
 
     async def search_brave(
         self, query: str, *, count: int = 5
     ) -> list[dict] | None:
         """Independent web search via Brave (2 000 queries/month free)."""
-        key = os.getenv("BRAVE_SEARCH_API_KEY")
+        key = _coerce_non_empty_service_secret("BRAVE_SEARCH_API_KEY")
         if not key:
             return None
         try:
@@ -141,16 +472,23 @@ class IntelligenceServices:
                 params={"q": query, "count": count},
             )
             if resp.status_code == 200:
-                return resp.json().get("web", {}).get("results", [])
-        except Exception:
-            logger.debug("Brave search failed for %r", query, exc_info=True)
+                payload = resp.json()
+                web = payload.get("web") if isinstance(payload, dict) else None
+                results = web.get("results", []) if isinstance(web, dict) else []
+                return _coerce_dict_list(results)
+        except Exception as exc:
+            logger.debug(
+                "Brave search failed for %r: %s",
+                _redact_service_error(query),
+                _redact_service_error(exc),
+            )
         return None
 
     async def search_exa(
         self, query: str, *, num_results: int = 5
     ) -> list[dict] | None:
         """Semantic search via Exa (1 000 searches/month free)."""
-        key = os.getenv("EXA_API_KEY")
+        key = _coerce_non_empty_service_secret("EXA_API_KEY")
         if not key:
             return None
         try:
@@ -160,16 +498,22 @@ class IntelligenceServices:
                 json={"query": query, "num_results": num_results},
             )
             if resp.status_code == 200:
-                return resp.json().get("results", [])
-        except Exception:
-            logger.debug("Exa search failed for %r", query, exc_info=True)
+                payload = resp.json()
+                results = payload.get("results", []) if isinstance(payload, dict) else []
+                return _coerce_dict_list(results)
+        except Exception as exc:
+            logger.debug(
+                "Exa search failed for %r: %s",
+                _redact_service_error(query),
+                _redact_service_error(exc),
+            )
         return None
 
     async def search_bing(
         self, query: str, *, count: int = 5
     ) -> list[dict] | None:
         """Web search via Bing/Azure (1 000 transactions/month free)."""
-        key = os.getenv("BING_SEARCH_API_KEY")
+        key = _coerce_non_empty_service_secret("BING_SEARCH_API_KEY")
         if not key:
             return None
         try:
@@ -179,14 +523,21 @@ class IntelligenceServices:
                 params={"q": query, "count": count},
             )
             if resp.status_code == 200:
-                return resp.json().get("webPages", {}).get("value", [])
-        except Exception:
-            logger.debug("Bing search failed for %r", query, exc_info=True)
+                payload = resp.json()
+                web_pages = payload.get("webPages") if isinstance(payload, dict) else None
+                results = web_pages.get("value", []) if isinstance(web_pages, dict) else []
+                return _coerce_dict_list(results)
+        except Exception as exc:
+            logger.debug(
+                "Bing search failed for %r: %s",
+                _redact_service_error(query),
+                _redact_service_error(exc),
+            )
         return None
 
     async def search_perplexity(self, query: str) -> str | None:
         """Search + LLM answer via Perplexity ($5 free credits)."""
-        key = os.getenv("PERPLEXITY_API_KEY")
+        key = _coerce_non_empty_service_secret("PERPLEXITY_API_KEY")
         if not key:
             return None
         try:
@@ -199,11 +550,13 @@ class IntelligenceServices:
                 },
             )
             if resp.status_code == 200:
-                choices = resp.json().get("choices", [])
-                if choices:
-                    return choices[0].get("message", {}).get("content")
-        except Exception:
-            logger.debug("Perplexity search failed for %r", query, exc_info=True)
+                return _coerce_llm_content(resp.json())
+        except Exception as exc:
+            logger.debug(
+                "Perplexity search failed for %r: %s",
+                _redact_service_error(query),
+                _redact_service_error(exc),
+            )
         return None
 
     async def search_stackoverflow(
@@ -223,6 +576,8 @@ class IntelligenceServices:
                 },
             )
             if resp.status_code == 200:
+                payload = resp.json()
+                items = payload.get("items", []) if isinstance(payload, dict) else []
                 return [
                     {
                         "title": item.get("title"),
@@ -230,10 +585,14 @@ class IntelligenceServices:
                         "score": item.get("score"),
                         "is_answered": item.get("is_answered"),
                     }
-                    for item in resp.json().get("items", [])
+                    for item in _coerce_dict_list(items)
                 ]
-        except Exception:
-            logger.debug("Stack Overflow search failed for %r", query, exc_info=True)
+        except Exception as exc:
+            logger.debug(
+                "Stack Overflow search failed for %r: %s",
+                _redact_service_error(query),
+                _redact_service_error(exc),
+            )
         return None
 
     async def search_web(self, query: str) -> list[dict]:
@@ -246,7 +605,7 @@ class IntelligenceServices:
         ]:
             try:
                 result = await fn(query)
-                if result:
+                if isinstance(result, list) and result:
                     return result
             except Exception:
                 continue
@@ -261,17 +620,27 @@ class IntelligenceServices:
         try:
             resp = await self._http.get(f"https://pypi.org/pypi/{package}/json")
             if resp.status_code == 200:
-                info = resp.json()["info"]
+                payload = resp.json()
+                info = payload.get("info") if isinstance(payload, dict) else None
+                if not isinstance(info, dict):
+                    return None
+                version = info.get("version")
+                if not isinstance(version, str) or not version:
+                    return None
                 return {
                     "name": package,
-                    "version": info["version"],
+                    "version": version,
                     "summary": info.get("summary", ""),
-                    "home_page": info.get("home_page") or info.get("project_url"),
+                    "home_page": _coerce_pypi_home_page(info),
                     "requires_python": info.get("requires_python"),
                     "license": info.get("license"),
                 }
-        except Exception:
-            logger.debug("PyPI lookup failed for %r", package, exc_info=True)
+        except Exception as exc:
+            logger.debug(
+                "PyPI lookup failed for %r: %s",
+                _redact_service_error(package),
+                _redact_service_error(exc),
+            )
         return None
 
     async def get_npm_info(self, package: str) -> dict | None:
@@ -282,15 +651,21 @@ class IntelligenceServices:
             )
             if resp.status_code == 200:
                 data = resp.json()
+                if not isinstance(data, dict):
+                    return None
                 return {
                     "name": package,
                     "version": data.get("version"),
                     "description": data.get("description", ""),
                     "homepage": data.get("homepage"),
-                    "repository": (data.get("repository") or {}).get("url"),
+                    "repository": _coerce_repository_url(data.get("repository")),
                 }
-        except Exception:
-            logger.debug("npm lookup failed for %r", package, exc_info=True)
+        except Exception as exc:
+            logger.debug(
+                "npm lookup failed for %r: %s",
+                _redact_service_error(package),
+                _redact_service_error(exc),
+            )
         return None
 
     async def get_crates_info(self, crate: str) -> dict | None:
@@ -301,7 +676,10 @@ class IntelligenceServices:
                 headers={"User-Agent": "codey-intelligence/1.0"},
             )
             if resp.status_code == 200:
-                c = resp.json().get("crate", {})
+                payload = resp.json()
+                c = payload.get("crate") if isinstance(payload, dict) else None
+                if not isinstance(c, dict):
+                    return None
                 return {
                     "name": crate,
                     "version": c.get("newest_version"),
@@ -310,8 +688,12 @@ class IntelligenceServices:
                     "repository": c.get("repository"),
                     "downloads": c.get("downloads"),
                 }
-        except Exception:
-            logger.debug("crates.io lookup failed for %r", crate, exc_info=True)
+        except Exception as exc:
+            logger.debug(
+                "crates.io lookup failed for %r: %s",
+                _redact_service_error(crate),
+                _redact_service_error(exc),
+            )
         return None
 
     async def get_maven_info(self, group_id: str, artifact_id: str) -> dict | None:
@@ -326,7 +708,14 @@ class IntelligenceServices:
                 },
             )
             if resp.status_code == 200:
-                docs = resp.json().get("response", {}).get("docs", [])
+                payload = resp.json()
+                response = (
+                    payload.get("response") if isinstance(payload, dict) else None
+                )
+                raw_docs = (
+                    response.get("docs", []) if isinstance(response, dict) else []
+                )
+                docs = _coerce_dict_list(raw_docs)
                 if docs:
                     d = docs[0]
                     return {
@@ -335,9 +724,12 @@ class IntelligenceServices:
                         "version": d.get("latestVersion"),
                         "timestamp": d.get("timestamp"),
                     }
-        except Exception:
+        except Exception as exc:
             logger.debug(
-                "Maven lookup failed for %s:%s", group_id, artifact_id, exc_info=True
+                "Maven lookup failed for %s:%s: %s",
+                _redact_service_error(group_id),
+                _redact_service_error(artifact_id),
+                _redact_service_error(exc),
             )
         return None
 
@@ -348,20 +740,35 @@ class IntelligenceServices:
                 f"https://packagist.org/packages/{package}.json"
             )
             if resp.status_code == 200:
-                pkg = resp.json().get("package", {})
-                versions = pkg.get("versions", {})
+                payload = resp.json()
+                pkg = payload.get("package") if isinstance(payload, dict) else None
+                if not isinstance(pkg, dict):
+                    return None
+                raw_versions = pkg.get("versions", {})
+                versions = raw_versions if isinstance(raw_versions, dict) else {}
                 latest_key = next(
-                    (k for k in versions if not k.startswith("dev-")), None
+                    (
+                        k
+                        for k in versions
+                        if isinstance(k, str) and not k.startswith("dev-")
+                    ),
+                    None,
                 )
                 latest = versions.get(latest_key, {}) if latest_key else {}
+                if not isinstance(latest, dict):
+                    latest = {}
                 return {
                     "name": package,
                     "version": latest.get("version"),
                     "description": pkg.get("description", ""),
                     "homepage": latest.get("homepage"),
                 }
-        except Exception:
-            logger.debug("Packagist lookup failed for %r", package, exc_info=True)
+        except Exception as exc:
+            logger.debug(
+                "Packagist lookup failed for %r: %s",
+                _redact_service_error(package),
+                _redact_service_error(exc),
+            )
         return None
 
     async def get_package_info(
@@ -400,16 +807,21 @@ class IntelligenceServices:
                 },
             )
             if resp.status_code == 200:
-                return resp.json().get("vulns", [])
-        except Exception:
+                payload = resp.json()
+                vulns = payload.get("vulns", []) if isinstance(payload, dict) else []
+                return _coerce_dict_list(vulns)
+        except Exception as exc:
             logger.debug(
-                "OSV check failed for %s@%s", package, version, exc_info=True
+                "OSV check failed for %s@%s: %s",
+                _redact_service_error(package),
+                _redact_service_error(version),
+                _redact_service_error(exc),
             )
         return []
 
     async def check_nvd(self, cve_id: str) -> dict | None:
         """Look up a CVE in the NVD/NIST database (free key, high limits)."""
-        key = os.getenv("NVD_API_KEY")
+        key = _coerce_non_empty_service_secret("NVD_API_KEY")
         headers: dict[str, str] = {}
         if key:
             headers["apiKey"] = key
@@ -420,11 +832,22 @@ class IntelligenceServices:
                 params={"cveId": cve_id},
             )
             if resp.status_code == 200:
-                vulns = resp.json().get("vulnerabilities", [])
+                payload = resp.json()
+                raw_vulns = (
+                    payload.get("vulnerabilities", [])
+                    if isinstance(payload, dict)
+                    else []
+                )
+                vulns = _coerce_dict_list(raw_vulns)
                 if vulns:
-                    return vulns[0].get("cve", {})
-        except Exception:
-            logger.debug("NVD lookup failed for %r", cve_id, exc_info=True)
+                    cve = vulns[0].get("cve")
+                    return cve if isinstance(cve, dict) else None
+        except Exception as exc:
+            logger.debug(
+                "NVD lookup failed for %r: %s",
+                _redact_service_error(cve_id),
+                _redact_service_error(exc),
+            )
         return None
 
     async def check_snyk(self, packages: list[dict]) -> list[dict]:
@@ -432,7 +855,7 @@ class IntelligenceServices:
 
         *packages* should be a list of ``{"name": ..., "version": ...}`` dicts.
         """
-        key = os.getenv("SNYK_API_KEY")
+        key = _coerce_non_empty_service_secret("SNYK_API_KEY")
         if not key:
             return []
         try:
@@ -442,11 +865,14 @@ class IntelligenceServices:
                 json={"packages": packages},
             )
             if resp.status_code == 200:
-                vulns = (
-                    resp.json()
-                    .get("issues", {})
-                    .get("vulnerabilities", [])
+                payload = resp.json()
+                issues = payload.get("issues") if isinstance(payload, dict) else None
+                raw_vulns = (
+                    issues.get("vulnerabilities", [])
+                    if isinstance(issues, dict)
+                    else []
                 )
+                vulns = _coerce_dict_list(raw_vulns)
                 return [
                     {
                         "package": v.get("package"),
@@ -456,8 +882,12 @@ class IntelligenceServices:
                     }
                     for v in vulns
                 ]
-        except Exception:
-            logger.debug("Snyk check failed", exc_info=True)
+        except Exception as exc:
+            logger.debug(
+                "Snyk check failed for %d packages: %s",
+                len(packages),
+                _redact_service_error(exc),
+            )
         return []
 
     async def check_package_security(
@@ -483,10 +913,14 @@ class IntelligenceServices:
             self.check_snyk([{"name": package, "version": version}]),
             return_exceptions=True,
         )
-        if isinstance(osv_vulns, BaseException):
+        if isinstance(osv_vulns, BaseException) or not isinstance(osv_vulns, list):
             osv_vulns = []
-        if isinstance(snyk_vulns, BaseException):
+        else:
+            osv_vulns = _coerce_dict_list(osv_vulns)
+        if isinstance(snyk_vulns, BaseException) or not isinstance(snyk_vulns, list):
             snyk_vulns = []
+        else:
+            snyk_vulns = _coerce_dict_list(snyk_vulns)
 
         osv_details = [
             {"id": v.get("id"), "summary": v.get("summary", ""), "source": "osv"}
@@ -515,38 +949,56 @@ class IntelligenceServices:
         Returns a list of findings with rule, severity, message, and line.
         Returns an empty list if Semgrep is not installed or fails.
         """
-        ext = _EXT_MAP.get(language, "py")
-        tmp_path = os.path.join(tempfile.gettempdir(), f"codey_scan_{uuid4()}.{ext}")
+        ext = _semgrep_extension(language)
+        tmp_path: str | None = None
         try:
-            with open(tmp_path, "w") as f:
+            with tempfile.NamedTemporaryFile(
+                "w",
+                encoding="utf-8",
+                prefix="codey_scan_",
+                suffix=f".{ext}",
+                delete=False,
+            ) as f:
+                tmp_path = f.name
                 f.write(code)
-            result = subprocess.run(
-                ["semgrep", "--config", "auto", "--json", "--quiet", tmp_path],
-                capture_output=True,
-                text=True,
-                timeout=30,
+            proc = await asyncio.create_subprocess_exec(
+                "semgrep",
+                "--config",
+                "auto",
+                "--json",
+                "--quiet",
+                "--metrics=off",
+                "--disable-version-check",
+                tmp_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
-            findings = json.loads(result.stdout).get("results", [])
-            return [
-                {
-                    "rule": finding["check_id"],
-                    "severity": finding.get("extra", {}).get("severity", "unknown"),
-                    "message": finding.get("extra", {}).get("message", ""),
-                    "line": finding.get("start", {}).get("line"),
-                }
-                for finding in findings
-            ]
+            try:
+                stdout, _stderr = await asyncio.wait_for(
+                    proc.communicate(),
+                    timeout=30,
+                )
+            except asyncio.TimeoutError:
+                await _terminate_service_process(proc, "Semgrep")
+                logger.warning("Semgrep scan timed out")
+                return []
+
+            payload = json.loads(_decode_process_output(stdout))
+            findings = payload.get("results", []) if isinstance(payload, dict) else []
+            return _normalize_semgrep_findings(findings)
         except FileNotFoundError:
             logger.debug("Semgrep not installed, skipping scan")
-        except subprocess.TimeoutExpired:
-            logger.warning("Semgrep scan timed out")
-        except Exception:
-            logger.debug("Semgrep scan failed", exc_info=True)
+        except Exception as exc:
+            logger.debug(
+                "Semgrep scan failed: %s",
+                _redact_service_error(exc),
+            )
         finally:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
+            if tmp_path is not None:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
         return []
 
     # ------------------------------------------------------------------
@@ -561,7 +1013,9 @@ class IntelligenceServices:
         per_page: int = 5,
     ) -> list[dict]:
         """Search all of GitHub for code examples (5 000 req/hour free)."""
-        token = os.getenv("GITHUB_TOKEN") or os.getenv("GITHUB_CLIENT_SECRET")
+        token = _coerce_non_empty_service_secret(
+            "GITHUB_TOKEN"
+        ) or _coerce_non_empty_service_secret("GITHUB_CLIENT_SECRET")
         headers = {"Accept": "application/vnd.github.v3+json"}
         if token:
             headers["Authorization"] = f"token {token}"
@@ -574,16 +1028,28 @@ class IntelligenceServices:
                 params={"q": q, "per_page": per_page},
             )
             if resp.status_code == 200:
-                return [
-                    {
-                        "repo": item["repository"]["full_name"],
-                        "path": item["path"],
-                        "url": item["html_url"],
-                    }
-                    for item in resp.json().get("items", [])
-                ]
-        except Exception:
-            logger.debug("GitHub code search failed for %r", query, exc_info=True)
+                payload = resp.json()
+                raw_items = payload.get("items", []) if isinstance(payload, dict) else []
+                results: list[dict] = []
+                for item in _coerce_dict_list(raw_items):
+                    repository = item.get("repository")
+                    repo_name = (
+                        repository.get("full_name")
+                        if isinstance(repository, dict)
+                        else None
+                    )
+                    path = item.get("path")
+                    url = item.get("html_url")
+                    if not all(isinstance(value, str) for value in (repo_name, path, url)):
+                        continue
+                    results.append({"repo": repo_name, "path": path, "url": url})
+                return results
+        except Exception as exc:
+            logger.debug(
+                "GitHub code search failed for %r: %s",
+                _redact_service_error(query),
+                _redact_service_error(exc),
+            )
         return []
 
     async def search_github_repos(
@@ -593,7 +1059,9 @@ class IntelligenceServices:
         per_page: int = 5,
     ) -> list[dict]:
         """Search GitHub repositories."""
-        token = os.getenv("GITHUB_TOKEN") or os.getenv("GITHUB_CLIENT_SECRET")
+        token = _coerce_non_empty_service_secret(
+            "GITHUB_TOKEN"
+        ) or _coerce_non_empty_service_secret("GITHUB_CLIENT_SECRET")
         headers = {"Accept": "application/vnd.github.v3+json"}
         if token:
             headers["Authorization"] = f"token {token}"
@@ -604,17 +1072,29 @@ class IntelligenceServices:
                 params={"q": query, "per_page": per_page, "sort": "stars"},
             )
             if resp.status_code == 200:
-                return [
-                    {
-                        "full_name": r["full_name"],
-                        "description": r.get("description", ""),
-                        "stars": r.get("stargazers_count", 0),
-                        "url": r["html_url"],
-                    }
-                    for r in resp.json().get("items", [])
-                ]
-        except Exception:
-            logger.debug("GitHub repo search failed for %r", query, exc_info=True)
+                payload = resp.json()
+                raw_items = payload.get("items", []) if isinstance(payload, dict) else []
+                results: list[dict] = []
+                for item in _coerce_dict_list(raw_items):
+                    full_name = item.get("full_name")
+                    url = item.get("html_url")
+                    if not isinstance(full_name, str) or not isinstance(url, str):
+                        continue
+                    results.append(
+                        {
+                            "full_name": full_name,
+                            "description": item.get("description", ""),
+                            "stars": item.get("stargazers_count", 0),
+                            "url": url,
+                        }
+                    )
+                return results
+        except Exception as exc:
+            logger.debug(
+                "GitHub repo search failed for %r: %s",
+                _redact_service_error(query),
+                _redact_service_error(exc),
+            )
         return []
 
     # ------------------------------------------------------------------
@@ -624,31 +1104,43 @@ class IntelligenceServices:
     async def fetch_devdocs(self, library: str) -> str | None:
         """Fetch documentation index from DevDocs (free, no key)."""
         try:
+            library_path = _quote_service_path_segment(library)
             resp = await self._http.get(
-                f"https://devdocs.io/api/entries/{library}"
+                f"https://devdocs.io/api/entries/{library_path}"
             )
             if resp.status_code == 200:
-                entries = resp.json()
-                if entries:
-                    return "\n".join(
-                        e.get("name", "") for e in entries[:20]
-                    )
-        except Exception:
-            logger.debug("DevDocs fetch failed for %r", library, exc_info=True)
+                entries = _coerce_dict_list(resp.json())
+                names = [
+                    name
+                    for entry in entries[:20]
+                    if isinstance(name := entry.get("name"), str)
+                ]
+                if names:
+                    return "\n".join(names)
+        except Exception as exc:
+            logger.debug(
+                "DevDocs fetch failed for %r: %s",
+                _redact_service_error(library),
+                _redact_service_error(exc),
+            )
         return None
 
     async def fetch_libraries_io(self, package: str, platform: str = "pypi") -> dict | None:
         """Cross-ecosystem dependency intelligence via Libraries.io (free key)."""
-        key = os.getenv("LIBRARIES_IO_API_KEY")
+        key = _coerce_non_empty_service_secret("LIBRARIES_IO_API_KEY")
         if not key:
             return None
         try:
+            platform_path = _quote_service_path_segment(platform)
+            package_path = _quote_service_path_segment(package)
             resp = await self._http.get(
-                f"https://libraries.io/api/{platform}/{package}",
+                f"https://libraries.io/api/{platform_path}/{package_path}",
                 params={"api_key": key},
             )
             if resp.status_code == 200:
                 data = resp.json()
+                if not isinstance(data, dict):
+                    return None
                 return {
                     "name": data.get("name"),
                     "platform": data.get("platform"),
@@ -657,8 +1149,13 @@ class IntelligenceServices:
                     "rank": data.get("rank"),
                     "homepage": data.get("homepage"),
                 }
-        except Exception:
-            logger.debug("Libraries.io lookup failed for %r", package, exc_info=True)
+        except Exception as exc:
+            logger.debug(
+                "Libraries.io lookup failed for %s/%r: %s",
+                _redact_service_error(platform),
+                _redact_service_error(package),
+                _redact_service_error(exc),
+            )
         return None
 
     # ------------------------------------------------------------------
@@ -683,14 +1180,14 @@ class IntelligenceServices:
             logger.warning("Unknown LLM provider: %s", provider)
             return None
 
-        api_key = os.getenv(cfg["key"])
+        api_key = _coerce_non_empty_service_secret(cfg["key"])
         if not api_key:
             return None
 
         base = cfg["base"]
         # Handle Cloudflare account-id substitution
         if provider == "cloudflare":
-            account_id = os.getenv("CLOUDFLARE_ACCOUNT_ID")
+            account_id = _coerce_non_empty_service_secret("CLOUDFLARE_ACCOUNT_ID")
             if not account_id:
                 return None
             base = base.replace("{account_id}", account_id)
@@ -711,12 +1208,13 @@ class IntelligenceServices:
                 },
             )
             if resp.status_code == 200:
-                choices = resp.json().get("choices", [])
-                if choices:
-                    return choices[0].get("message", {}).get("content")
-        except Exception:
+                return _coerce_llm_content(resp.json())
+        except Exception as exc:
             logger.debug(
-                "LLM completion failed for %s/%s", provider, model, exc_info=True
+                "LLM completion failed for %s/%s: %s",
+                _redact_service_error(provider),
+                _redact_service_error(model),
+                _redact_service_error(exc),
             )
         return None
 
@@ -732,7 +1230,7 @@ class IntelligenceServices:
         self, project_key: str, *, metric_keys: str = "bugs,vulnerabilities,code_smells"
     ) -> dict | None:
         """Fetch code quality metrics from SonarCloud (free for public repos)."""
-        token = os.getenv("SONARCLOUD_TOKEN")
+        token = _coerce_non_empty_service_secret("SONARCLOUD_TOKEN")
         if not token:
             return None
         try:
@@ -742,15 +1240,32 @@ class IntelligenceServices:
                 params={"component": project_key, "metricKeys": metric_keys},
             )
             if resp.status_code == 200:
-                measures = resp.json().get("component", {}).get("measures", [])
-                return {m["metric"]: m["value"] for m in measures}
-        except Exception:
-            logger.debug("SonarCloud check failed for %r", project_key, exc_info=True)
+                payload = resp.json()
+                component = (
+                    payload.get("component") if isinstance(payload, dict) else None
+                )
+                raw_measures = (
+                    component.get("measures", [])
+                    if isinstance(component, dict)
+                    else []
+                )
+                metrics: dict = {}
+                for measure in _coerce_dict_list(raw_measures):
+                    metric = measure.get("metric")
+                    if isinstance(metric, str) and "value" in measure:
+                        metrics[metric] = measure["value"]
+                return metrics
+        except Exception as exc:
+            logger.debug(
+                "SonarCloud check failed for %r: %s",
+                _redact_service_error(project_key),
+                _redact_service_error(exc),
+            )
         return None
 
     async def check_aikido(self, repo_url: str) -> list[dict] | None:
         """Fetch security findings from Aikido Security (free tier)."""
-        key = os.getenv("AIKIDO_API_KEY")
+        key = _coerce_non_empty_service_secret("AIKIDO_API_KEY")
         if not key:
             return None
         try:
@@ -760,14 +1275,20 @@ class IntelligenceServices:
                 params={"repo": repo_url, "status": "open"},
             )
             if resp.status_code == 200:
-                return resp.json().get("issues", [])
-        except Exception:
-            logger.debug("Aikido check failed for %r", repo_url, exc_info=True)
+                payload = resp.json()
+                issues = payload.get("issues", []) if isinstance(payload, dict) else []
+                return _coerce_dict_list(issues)
+        except Exception as exc:
+            logger.debug(
+                "Aikido check failed for %r: %s",
+                _redact_service_error(repo_url),
+                _redact_service_error(exc),
+            )
         return None
 
     async def check_deepsource(self, repo: str) -> dict | None:
         """Fetch code analysis from DeepSource (free for public repos)."""
-        token = os.getenv("DEEPSOURCE_TOKEN")
+        token = _coerce_non_empty_service_secret("DEEPSOURCE_TOKEN")
         if not token:
             return None
         try:
@@ -792,9 +1313,16 @@ class IntelligenceServices:
                 },
             )
             if resp.status_code == 200:
-                return resp.json().get("data", {}).get("repository")
-        except Exception:
-            logger.debug("DeepSource check failed for %r", repo, exc_info=True)
+                payload = resp.json()
+                data = payload.get("data") if isinstance(payload, dict) else None
+                repository = data.get("repository") if isinstance(data, dict) else None
+                return repository if isinstance(repository, dict) else None
+        except Exception as exc:
+            logger.debug(
+                "DeepSource check failed for %r: %s",
+                _redact_service_error(repo),
+                _redact_service_error(exc),
+            )
         return None
 
     # ------------------------------------------------------------------
@@ -805,7 +1333,7 @@ class IntelligenceServices:
         self, url: str, *, name: str = "Codey Monitor"
     ) -> dict | None:
         """Create an uptime monitor via BetterStack (3 monitors free)."""
-        key = os.getenv("BETTERSTACK_API_KEY")
+        key = _coerce_non_empty_service_secret("BETTERSTACK_API_KEY")
         if not key:
             return None
         try:
@@ -820,14 +1348,20 @@ class IntelligenceServices:
                 },
             )
             if resp.status_code in (200, 201):
-                return resp.json().get("data", {}).get("attributes")
-        except Exception:
-            logger.debug("BetterStack monitor creation failed", exc_info=True)
+                payload = resp.json()
+                data = payload.get("data") if isinstance(payload, dict) else None
+                attributes = data.get("attributes") if isinstance(data, dict) else None
+                return attributes if isinstance(attributes, dict) else None
+        except Exception as exc:
+            logger.debug(
+                "BetterStack monitor creation failed: %s",
+                _redact_service_error(exc),
+            )
         return None
 
     async def betterstack_get_monitors(self) -> list[dict]:
         """List all BetterStack uptime monitors."""
-        key = os.getenv("BETTERSTACK_API_KEY")
+        key = _coerce_non_empty_service_secret("BETTERSTACK_API_KEY")
         if not key:
             return []
         try:
@@ -836,22 +1370,36 @@ class IntelligenceServices:
                 headers={"Authorization": f"Bearer {key}"},
             )
             if resp.status_code == 200:
-                return [
-                    {
-                        "id": m["id"],
-                        "url": m["attributes"]["url"],
-                        "status": m["attributes"]["status"],
-                        "last_checked": m["attributes"].get("last_checked_at"),
-                    }
-                    for m in resp.json().get("data", [])
-                ]
-        except Exception:
-            logger.debug("BetterStack monitor list failed", exc_info=True)
+                payload = resp.json()
+                raw_monitors = (
+                    payload.get("data", []) if isinstance(payload, dict) else []
+                )
+                monitors: list[dict] = []
+                for monitor in _coerce_dict_list(raw_monitors):
+                    attributes = monitor.get("attributes")
+                    if not isinstance(attributes, dict) or "id" not in monitor:
+                        continue
+                    if "url" not in attributes or "status" not in attributes:
+                        continue
+                    monitors.append(
+                        {
+                            "id": monitor["id"],
+                            "url": attributes["url"],
+                            "status": attributes["status"],
+                            "last_checked": attributes.get("last_checked_at"),
+                        }
+                    )
+                return monitors
+        except Exception as exc:
+            logger.debug(
+                "BetterStack monitor list failed: %s",
+                _redact_service_error(exc),
+            )
         return []
 
     async def uptimerobot_get_monitors(self) -> list[dict]:
         """List all UptimeRobot monitors (50 free)."""
-        key = os.getenv("UPTIMEROBOT_API_KEY")
+        key = _coerce_non_empty_service_secret("UPTIMEROBOT_API_KEY")
         if not key:
             return []
         try:
@@ -860,24 +1408,38 @@ class IntelligenceServices:
                 json={"api_key": key, "format": "json"},
             )
             if resp.status_code == 200:
-                return [
-                    {
-                        "id": m["id"],
-                        "name": m["friendly_name"],
-                        "url": m["url"],
-                        "status": m["status"],
-                    }
-                    for m in resp.json().get("monitors", [])
-                ]
-        except Exception:
-            logger.debug("UptimeRobot list failed", exc_info=True)
+                payload = resp.json()
+                raw_monitors = (
+                    payload.get("monitors", []) if isinstance(payload, dict) else []
+                )
+                monitors: list[dict] = []
+                for monitor in _coerce_dict_list(raw_monitors):
+                    if not all(
+                        key in monitor
+                        for key in ("id", "friendly_name", "url", "status")
+                    ):
+                        continue
+                    monitors.append(
+                        {
+                            "id": monitor["id"],
+                            "name": monitor["friendly_name"],
+                            "url": monitor["url"],
+                            "status": monitor["status"],
+                        }
+                    )
+                return monitors
+        except Exception as exc:
+            logger.debug(
+                "UptimeRobot list failed: %s",
+                _redact_service_error(exc),
+            )
         return []
 
     async def uptimerobot_create_monitor(
         self, url: str, *, name: str = "Codey Monitor"
     ) -> dict | None:
         """Create an UptimeRobot HTTP monitor."""
-        key = os.getenv("UPTIMEROBOT_API_KEY")
+        key = _coerce_non_empty_service_secret("UPTIMEROBOT_API_KEY")
         if not key:
             return None
         try:
@@ -891,10 +1453,16 @@ class IntelligenceServices:
                     "friendly_name": name,
                 },
             )
-            if resp.status_code == 200 and resp.json().get("stat") == "ok":
-                return resp.json().get("monitor", {})
-        except Exception:
-            logger.debug("UptimeRobot create failed", exc_info=True)
+            if resp.status_code == 200:
+                payload = resp.json()
+                if isinstance(payload, dict) and payload.get("stat") == "ok":
+                    monitor = payload.get("monitor")
+                    return monitor if isinstance(monitor, dict) else None
+        except Exception as exc:
+            logger.debug(
+                "UptimeRobot create failed: %s",
+                _redact_service_error(exc),
+            )
         return None
 
     # ------------------------------------------------------------------
@@ -905,7 +1473,7 @@ class IntelligenceServices:
         self, *, team_key: str | None = None, limit: int = 10
     ) -> list[dict]:
         """Fetch issues from Linear (free tier)."""
-        key = os.getenv("LINEAR_API_KEY")
+        key = _coerce_non_empty_service_secret("LINEAR_API_KEY")
         if not key:
             return []
         try:
@@ -925,24 +1493,43 @@ class IntelligenceServices:
                 json={"query": query, "variables": {"limit": limit}},
             )
             if resp.status_code == 200:
-                nodes = resp.json().get("data", {}).get("issues", {}).get("nodes", [])
-                return [
-                    {
-                        "id": n["identifier"],
-                        "title": n["title"],
-                        "state": n.get("state", {}).get("name"),
-                        "priority": n.get("priority"),
-                        "assignee": (n.get("assignee") or {}).get("name"),
-                    }
-                    for n in nodes
-                ]
-        except Exception:
-            logger.debug("Linear issues fetch failed", exc_info=True)
+                payload = resp.json()
+                data = payload.get("data") if isinstance(payload, dict) else None
+                issues = data.get("issues") if isinstance(data, dict) else None
+                raw_nodes = issues.get("nodes", []) if isinstance(issues, dict) else []
+                result: list[dict] = []
+                for node in _coerce_dict_list(raw_nodes):
+                    identifier = node.get("identifier")
+                    title = node.get("title")
+                    if not isinstance(identifier, str) or not isinstance(title, str):
+                        continue
+                    state = node.get("state")
+                    assignee = node.get("assignee")
+                    result.append(
+                        {
+                            "id": identifier,
+                            "title": title,
+                            "state": state.get("name") if isinstance(state, dict) else None,
+                            "priority": node.get("priority"),
+                            "assignee": (
+                                assignee.get("name")
+                                if isinstance(assignee, dict)
+                                else None
+                            ),
+                        }
+                    )
+                return result
+        except Exception as exc:
+            logger.debug(
+                "Linear issues fetch failed for limit %s: %s",
+                _redact_service_error(limit),
+                _redact_service_error(exc),
+            )
         return []
 
     async def vercel_get_deployments(self, *, limit: int = 5) -> list[dict]:
         """Fetch recent deployments from Vercel."""
-        token = os.getenv("VERCEL_TOKEN")
+        token = _coerce_non_empty_service_secret("VERCEL_TOKEN")
         if not token:
             return []
         try:
@@ -952,23 +1539,37 @@ class IntelligenceServices:
                 params={"limit": limit},
             )
             if resp.status_code == 200:
-                return [
-                    {
-                        "id": d["uid"],
-                        "name": d.get("name"),
-                        "state": d.get("state"),
-                        "url": d.get("url"),
-                        "created": d.get("created"),
-                    }
-                    for d in resp.json().get("deployments", [])
-                ]
-        except Exception:
-            logger.debug("Vercel deployments fetch failed", exc_info=True)
+                payload = resp.json()
+                raw_deployments = (
+                    payload.get("deployments", [])
+                    if isinstance(payload, dict)
+                    else []
+                )
+                deployments: list[dict] = []
+                for deployment in _coerce_dict_list(raw_deployments):
+                    deployment_id = deployment.get("uid")
+                    if not isinstance(deployment_id, str) or not deployment_id:
+                        continue
+                    deployments.append(
+                        {
+                            "id": deployment_id,
+                            "name": deployment.get("name"),
+                            "state": deployment.get("state"),
+                            "url": deployment.get("url"),
+                            "created": deployment.get("created"),
+                        }
+                    )
+                return deployments
+        except Exception as exc:
+            logger.debug(
+                "Vercel deployments fetch failed: %s",
+                _redact_service_error(exc),
+            )
         return []
 
     async def railway_get_services(self, project_id: str) -> list[dict]:
         """Fetch services from a Railway project."""
-        token = os.getenv("RAILWAY_TOKEN")
+        token = _coerce_non_empty_service_secret("RAILWAY_TOKEN")
         if not token:
             return []
         try:
@@ -989,16 +1590,31 @@ class IntelligenceServices:
                 },
             )
             if resp.status_code == 200:
-                edges = (
-                    resp.json()
-                    .get("data", {})
-                    .get("project", {})
-                    .get("services", {})
-                    .get("edges", [])
+                payload = resp.json()
+                data = payload.get("data") if isinstance(payload, dict) else None
+                project = data.get("project") if isinstance(data, dict) else None
+                services = (
+                    project.get("services") if isinstance(project, dict) else None
                 )
-                return [{"id": e["node"]["id"], "name": e["node"]["name"]} for e in edges]
-        except Exception:
-            logger.debug("Railway services fetch failed", exc_info=True)
+                raw_edges = (
+                    services.get("edges", []) if isinstance(services, dict) else []
+                )
+                result: list[dict] = []
+                for edge in _coerce_dict_list(raw_edges):
+                    node = edge.get("node")
+                    if not isinstance(node, dict):
+                        continue
+                    service_id = node.get("id")
+                    name = node.get("name")
+                    if not isinstance(service_id, str) or not isinstance(name, str):
+                        continue
+                    result.append({"id": service_id, "name": name})
+                return result
+        except Exception as exc:
+            logger.debug(
+                "Railway services fetch failed: %s",
+                _redact_service_error(exc),
+            )
         return []
 
     # ------------------------------------------------------------------
@@ -1007,9 +1623,9 @@ class IntelligenceServices:
 
     async def send_sms_twilio(self, to: str, body: str) -> bool:
         """Send SMS via Twilio (free trial credits)."""
-        sid = os.getenv("TWILIO_ACCOUNT_SID")
-        token = os.getenv("TWILIO_AUTH_TOKEN")
-        from_number = os.getenv("TWILIO_FROM_NUMBER")
+        sid = _coerce_non_empty_service_secret("TWILIO_ACCOUNT_SID")
+        token = _coerce_non_empty_service_secret("TWILIO_AUTH_TOKEN")
+        from_number = _coerce_non_empty_service_secret("TWILIO_FROM_NUMBER")
         if not (sid and token and from_number):
             return False
         try:
@@ -1019,8 +1635,8 @@ class IntelligenceServices:
                 data={"To": to, "From": from_number, "Body": body},
             )
             return resp.status_code == 201
-        except Exception:
-            logger.debug("Twilio SMS failed", exc_info=True)
+        except Exception as exc:
+            logger.debug("Twilio SMS failed: %s", _redact_service_error(exc))
         return False
 
     # ------------------------------------------------------------------
@@ -1029,26 +1645,28 @@ class IntelligenceServices:
 
     async def notify_discord(self, content: str) -> bool:
         """Send a message via Discord webhook (free)."""
-        url = os.getenv("DISCORD_WEBHOOK_URL")
+        url = _coerce_service_webhook_url("DISCORD_WEBHOOK_URL")
         if not url:
             return False
         try:
             resp = await self._http.post(url, json={"content": content})
             return resp.status_code in (200, 204)
-        except Exception:
-            logger.debug("Discord notification failed", exc_info=True)
+        except Exception as exc:
+            logger.debug(
+                "Discord notification failed: %s", _redact_service_error(exc)
+            )
         return False
 
     async def notify_slack(self, text: str) -> bool:
         """Send a message via Slack incoming webhook (free)."""
-        url = os.getenv("SLACK_WEBHOOK_URL")
+        url = _coerce_service_webhook_url("SLACK_WEBHOOK_URL")
         if not url:
             return False
         try:
             resp = await self._http.post(url, json={"text": text})
             return resp.status_code == 200
-        except Exception:
-            logger.debug("Slack notification failed", exc_info=True)
+        except Exception as exc:
+            logger.debug("Slack notification failed: %s", _redact_service_error(exc))
         return False
 
     # ------------------------------------------------------------------
@@ -1157,7 +1775,7 @@ class IntelligenceServices:
         return [
             name
             for name, cfg in PROVIDERS.items()
-            if os.getenv(cfg["key"])
+            if _coerce_non_empty_service_secret(cfg["key"])
         ]
 
 

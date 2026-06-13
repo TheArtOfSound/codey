@@ -1,266 +1,269 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
-  Network,
-  Shield,
+  Activity,
+  ArrowRight,
   Bot,
   Check,
-  Minus,
   ChevronDown,
+  GitBranch,
+  Minus,
+  Search,
+  Shield,
   Zap,
-  ArrowRight,
 } from "lucide-react";
-
-// ── Animated Background ──────────────────────────────────────────────────────
+import { repoWorkLanes } from "@/lib/repo-work";
 
 function GridBackground() {
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden">
-      {/* Dot grid */}
       <div
-        className="absolute inset-0 opacity-[0.07]"
+        className="absolute inset-0 opacity-[0.06]"
         style={{
           backgroundImage:
-            "radial-gradient(circle, #00ff88 1px, transparent 1px)",
-          backgroundSize: "40px 40px",
+            "radial-gradient(circle, rgba(0,255,136,0.9) 1px, transparent 1px)",
+          backgroundSize: "42px 42px",
         }}
       />
-      {/* Horizontal scan line */}
-      <div
-        className="absolute left-0 right-0 h-px opacity-20"
-        style={{
-          background:
-            "linear-gradient(90deg, transparent, #00ff88, transparent)",
-          animation: "scanV 6s ease-in-out infinite",
-        }}
-      />
-      {/* Radial glow */}
-      <div className="absolute left-1/2 top-1/3 h-[600px] w-[600px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-codey-green/5 blur-[120px]" />
-      <style jsx>{`
-        @keyframes scanV {
-          0%,
-          100% {
-            top: 10%;
-          }
-          50% {
-            top: 50%;
-          }
-        }
-      `}</style>
+      <div className="absolute inset-x-0 top-0 h-[45vh] bg-[radial-gradient(circle_at_top,rgba(0,255,136,0.18),transparent_58%)]" />
+      <div className="absolute -left-24 top-28 h-72 w-72 rounded-full bg-codey-green/10 blur-[120px]" />
+      <div className="absolute right-0 top-1/2 h-80 w-80 rounded-full bg-codey-green/5 blur-[140px]" />
     </div>
   );
 }
 
-// ── Fake Terminal Demo ───────────────────────────────────────────────────────
+const liveLoop = [
+  {
+    label: "Dependency drift detected",
+    repo: "checkout-service",
+    detail: "2 packages passed policy window · PR queued",
+    status: "Queued patch",
+  },
+  {
+    label: "Crash cluster spiking",
+    repo: "dashboard-web",
+    detail: "Auth callback regression linked to release 248",
+    status: "Triaging",
+  },
+  {
+    label: "Structural health dropped",
+    repo: "billing-api",
+    detail: "Stress radius widened across webhook + ledger modules",
+    status: "Preparing fix",
+  },
+  {
+    label: "Maintenance window complete",
+    repo: "infra-tooling",
+    detail: "Tests passed · changelog and PR summary published",
+    status: "Verified",
+  },
+];
 
-function LiveDemo() {
-  const [lineIndex, setLineIndex] = useState(0);
-
-  const lines = [
-    { text: "$ codey analyze ./src", cls: "text-codey-text-dim" },
-    { text: "Scanning 847 files across 23 packages...", cls: "text-codey-text-dim" },
-    { text: "Building dependency graph ██████████ 100%", cls: "text-codey-green" },
-    { text: "", cls: "" },
-    {
-      text: "  Structural Report",
-      cls: "text-codey-text font-bold",
-    },
-    { text: "  ├─ Nodes: 847   Edges: 3,291", cls: "text-codey-text-dim" },
-    { text: "  ├─ Coupling:   0.82  ── coupling health", cls: "text-codey-green" },
-    { text: "  ├─ Stability:  0.14  ── stress level", cls: "text-codey-green" },
-    { text: "  ├─ Phase:      Laminar Flow ✓", cls: "text-codey-green" },
-    { text: "", cls: "" },
-    {
-      text: "  ⚠  2 collapse-risk clusters detected:",
-      cls: "text-codey-yellow",
-    },
-    {
-      text: '    → src/api/handlers.ts  (fan-in: 34, local stability: 0.71)',
-      cls: "text-codey-yellow",
-    },
-    {
-      text: '    → src/db/queries.ts    (fan-in: 28, local stability: 0.63)',
-      cls: "text-codey-yellow",
-    },
-    { text: "", cls: "" },
-    {
-      text: "  Generating refactor plan to improve stability...",
-      cls: "text-codey-text-dim",
-    },
-    {
-      text: "  ✓ Plan ready — 4 files, estimated 12 credits",
-      cls: "text-codey-green",
-    },
-  ];
+function OpsBoard() {
+  const [index, setIndex] = useState(0);
 
   useEffect(() => {
-    if (lineIndex >= lines.length) return;
-    const delay = lineIndex === 0 ? 800 : lineIndex < 3 ? 600 : 300;
-    const timer = setTimeout(() => setLineIndex((i) => i + 1), delay);
-    return () => clearTimeout(timer);
-  }, [lineIndex, lines.length]);
+    const timer = setInterval(() => {
+      setIndex((current) => (current + 1) % liveLoop.length);
+    }, 2200);
+    return () => clearInterval(timer);
+  }, []);
+
+  const active = liveLoop[index];
 
   return (
-    <div className="mx-auto max-w-3xl">
-      <div className="overflow-hidden rounded-xl border border-codey-border bg-[#0a0a0f] shadow-2xl">
-        {/* Title bar */}
-        <div className="flex items-center gap-2 border-b border-codey-border px-4 py-3">
-          <span className="h-3 w-3 rounded-full bg-codey-red/80" />
-          <span className="h-3 w-3 rounded-full bg-codey-yellow/80" />
-          <span className="h-3 w-3 rounded-full bg-codey-green/80" />
-          <span className="ml-3 text-xs text-codey-text-muted font-mono">
-            codey — terminal
-          </span>
+    <div className="overflow-hidden rounded-[28px] border border-codey-border bg-[#0b0d12]/95 shadow-[0_30px_80px_rgba(0,0,0,0.35)]">
+      <div className="flex items-center justify-between border-b border-codey-border px-5 py-4">
+        <div>
+          <p className="text-xs uppercase tracking-[0.28em] text-codey-text-muted">
+            Repo Command
+          </p>
+          <p className="mt-1 text-sm font-medium text-codey-text">
+            Autonomous maintenance queue
+          </p>
         </div>
-        {/* Lines */}
-        <div className="min-h-[360px] p-5 font-mono text-sm leading-relaxed">
-          {lines.slice(0, lineIndex).map((line, i) => (
-            <div
-              key={i}
-              className={`${line.cls} animate-fade-in`}
-              style={{ animationDelay: `${i * 50}ms` }}
-            >
-              {line.text || "\u00A0"}
-            </div>
-          ))}
-          {lineIndex < lines.length && (
-            <span className="inline-block h-4 w-2 animate-pulse bg-codey-green/80" />
-          )}
-        </div>
-        {/* Health gauges bar */}
-        <div className="flex items-center justify-between border-t border-codey-border px-5 py-3">
-          <div className="flex items-center gap-6 text-xs">
-            <GaugePill label="Coupling" value={0.82} color="green" />
-            <GaugePill label="Stability" value={0.14} color="green" />
+        <span className="rounded-full border border-codey-green/30 bg-codey-green/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-codey-green">
+          Live
+        </span>
+      </div>
+
+      <div className="grid gap-6 p-5 lg:grid-cols-[1.2fr_0.8fr]">
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            {[
+              { label: "Repos watched", value: "26" },
+              { label: "Risks open", value: "7" },
+              { label: "Patches queued", value: "4" },
+              { label: "PRs shipped", value: "91" },
+            ].map((item) => (
+              <div
+                key={item.label}
+                className="rounded-2xl border border-codey-border/80 bg-codey-card/40 px-4 py-4"
+              >
+                <p className="text-[11px] uppercase tracking-[0.18em] text-codey-text-muted">
+                  {item.label}
+                </p>
+                <p className="mt-2 text-2xl font-semibold text-codey-text">
+                  {item.value}
+                </p>
+              </div>
+            ))}
           </div>
-          <span className="badge-green text-xs">Laminar Flow</span>
+
+          <div className="rounded-2xl border border-codey-border/80 bg-codey-card/40 p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.2em] text-codey-text-muted">
+                  Active incident
+                </p>
+                <h3 className="mt-2 text-lg font-semibold text-codey-text">
+                  {active.label}
+                </h3>
+                <p className="mt-2 text-sm text-codey-text-dim">{active.detail}</p>
+              </div>
+              <div className="rounded-full border border-codey-border bg-codey-bg px-3 py-1 text-xs font-medium text-codey-text-dim">
+                {active.status}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-codey-border/80 bg-codey-card/40 p-4">
+          <p className="text-xs uppercase tracking-[0.2em] text-codey-text-muted">
+            Operator feed
+          </p>
+          <div className="mt-4 space-y-3">
+            {liveLoop.map((item, itemIndex) => {
+              const isActive = itemIndex === index;
+              return (
+                <div
+                  key={`${item.repo}-${item.label}`}
+                  className={`rounded-2xl border px-4 py-3 transition-all ${
+                    isActive
+                      ? "border-codey-green/40 bg-codey-green/10"
+                      : "border-codey-border/80 bg-codey-bg/60"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-medium text-codey-text">{item.repo}</p>
+                    <span
+                      className={`h-2.5 w-2.5 rounded-full ${
+                        isActive ? "bg-codey-green shadow-glow-green" : "bg-codey-text-muted"
+                      }`}
+                    />
+                  </div>
+                  <p className="mt-1 text-xs text-codey-text-dim">{item.label}</p>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-function GaugePill({
-  label,
-  value,
-  color,
-}: {
-  label: string;
-  value: number;
-  color: "green" | "yellow" | "red";
-}) {
-  const barColor =
-    color === "green"
-      ? "bg-codey-green"
-      : color === "yellow"
-      ? "bg-codey-yellow"
-      : "bg-codey-red";
-  return (
-    <div className="flex items-center gap-2">
-      <span className="text-codey-text-muted">{label}</span>
-      <div className="h-1.5 w-16 overflow-hidden rounded-full bg-codey-border">
-        <div
-          className={`h-full ${barColor} transition-all duration-1000`}
-          style={{ width: `${value * 100}%` }}
-        />
-      </div>
-      <span className="text-codey-text-dim">{value.toFixed(2)}</span>
-    </div>
-  );
-}
-
-// ── Feature Cards ────────────────────────────────────────────────────────────
-
-const features = [
+const operatingLoop = [
   {
-    icon: Network,
-    title: "Network-Aware Generation",
-    desc: "Codey maps your entire codebase as a dependency network before writing a single line. Every suggestion respects coupling boundaries, import chains, and data flow paths.",
+    icon: Search,
+    title: "Scan continuously",
+    description:
+      "Watch repos for structural regressions, risky diffs, stale dependencies, and recurring failures before they become incidents.",
+  },
+  {
+    icon: Activity,
+    title: "Prioritize the queue",
+    description:
+      "Rank work by blast radius, failing checks, churn, and dependency pressure so the highest-value maintenance runs first.",
+  },
+  {
+    icon: GitBranch,
+    title: "Prepare the patch",
+    description:
+      "Generate targeted changes, branch them cleanly, and collect notes, health deltas, and PR-ready rationale.",
   },
   {
     icon: Shield,
-    title: "Collapse Prediction",
-    desc: "Structural stress analysis identifies modules on the edge of cascading failure. Codey warns you before a refactor triggers a chain reaction across your system.",
-  },
-  {
-    icon: Bot,
-    title: "Autonomous Mode",
-    desc: "Point Codey at a goal and let it work. Multi-step refactors, test generation, and dependency cleanup run autonomously with real-time progress streaming.",
+    title: "Prove the change",
+    description:
+      "Run tests, compare before-and-after health, and keep rollback signals visible so autonomy stays accountable.",
   },
 ];
 
-// ── Comparison Table ─────────────────────────────────────────────────────────
+type Coverage = "check" | "partial" | "none";
 
-type CellValue = "check" | "x" | "partial";
-
-interface CompRow {
+const coverageRows: Array<{
   feature: string;
-  codey: CellValue;
-  copilot: CellValue;
-  cursor: CellValue;
-  claude: CellValue;
-}
-
-const compRows: CompRow[] = [
-  { feature: "Code generation", codey: "check", copilot: "check", cursor: "check", claude: "check" },
-  { feature: "Multi-file editing", codey: "check", copilot: "partial", cursor: "check", claude: "check" },
-  { feature: "Dependency graph", codey: "check", copilot: "x", cursor: "x", claude: "x" },
-  { feature: "Stress analysis", codey: "check", copilot: "x", cursor: "x", claude: "x" },
-  { feature: "Collapse prediction", codey: "check", copilot: "x", cursor: "x", claude: "x" },
-  { feature: "Cascade simulation", codey: "check", copilot: "x", cursor: "x", claude: "x" },
-  { feature: "Stability optimization", codey: "check", copilot: "x", cursor: "x", claude: "x" },
-  { feature: "Autonomous mode", codey: "check", copilot: "x", cursor: "partial", claude: "check" },
-  { feature: "Health dashboard", codey: "check", copilot: "x", cursor: "x", claude: "x" },
+  codey: Coverage;
+  copilots: Coverage;
+  ci: Coverage;
+  bots: Coverage;
+}> = [
+  { feature: "Continuous repo scanning", codey: "check", copilots: "none", ci: "partial", bots: "partial" },
+  { feature: "Priority-ranked maintenance queue", codey: "check", copilots: "none", ci: "none", bots: "none" },
+  { feature: "Autonomous patch preparation", codey: "check", copilots: "partial", ci: "none", bots: "partial" },
+  { feature: "CI rescue and build repair", codey: "check", copilots: "partial", ci: "partial", bots: "none" },
+  { feature: "Security hardening runs", codey: "check", copilots: "partial", ci: "none", bots: "none" },
+  { feature: "Docs, runbook, and changelog updates", codey: "check", copilots: "partial", ci: "none", bots: "none" },
+  { feature: "Release blocker and deploy handling", codey: "check", copilots: "partial", ci: "partial", bots: "none" },
+  { feature: "Health and blast-radius context", codey: "check", copilots: "none", ci: "none", bots: "none" },
+  { feature: "Repo-level run history", codey: "check", copilots: "none", ci: "partial", bots: "partial" },
+  { feature: "One operator view across repos", codey: "check", copilots: "none", ci: "none", bots: "none" },
 ];
 
-function CellIcon({ value }: { value: CellValue }) {
-  if (value === "check")
+function CoverageIcon({ value }: { value: Coverage }) {
+  if (value === "check") {
     return <Check className="mx-auto h-4 w-4 text-codey-green" />;
-  if (value === "partial")
+  }
+  if (value === "partial") {
     return <Minus className="mx-auto h-4 w-4 text-codey-yellow" />;
+  }
   return <Minus className="mx-auto h-4 w-4 text-codey-text-muted/40" />;
 }
 
-// ── FAQ ──────────────────────────────────────────────────────────────────────
-
 const faqItems = [
   {
-    q: "What is structural health analysis?",
-    a: "Codey models your codebase as a dependency network. It quantifies coupling, stress, and cascade risk — metrics no other tool provides.",
+    q: "What does Codey actually manage?",
+    a: "Connected repositories, maintenance queues, structural risk, bug repair, dependency drift, CI rescue, security hardening, docs, and release-blocking repo work with reviewable outputs.",
   },
   {
-    q: "How is Codey different from Copilot?",
-    a: "Copilot suggests code line-by-line. Codey understands your entire dependency graph and generates code that improves your system's structural health.",
+    q: "Is this just another coding copilot?",
+    a: "No. Copilots wait for prompts inside an editor. Codey stays on the repo, watches what changes, decides what matters, and prepares work continuously.",
   },
   {
-    q: "What languages are supported?",
-    a: "TypeScript, JavaScript, Python, Go, Rust, Java, and C#. More languages are added regularly.",
+    q: "Does Codey cover more than refactors and dependency bumps?",
+    a: "Yes. The operator model spans repo scans, targeted fixes, CI repair, security passes, tests, docs, release blockers, and tooling work. Some lanes run continuously, others are queued on demand.",
+  },
+  {
+    q: "Can I control what autonomy is allowed to do?",
+    a: "Yes. Repo-level policies let you gate refactors, bug fixes, dependency updates, and impact thresholds before Codey takes action.",
   },
 ];
 
 function FAQ() {
-  const [open, setOpen] = useState<number | null>(null);
+  const [open, setOpen] = useState<number | null>(0);
+
   return (
-    <div className="mx-auto max-w-2xl space-y-3">
-      {faqItems.map((item, i) => (
-        <div key={i} className="rounded-lg border border-codey-border bg-codey-card">
+    <div className="mx-auto max-w-3xl divide-y divide-codey-border rounded-[28px] border border-codey-border bg-codey-card/40">
+      {faqItems.map((item, index) => (
+        <div key={item.q} className="px-5 py-4">
           <button
-            onClick={() => setOpen(open === i ? null : i)}
-            className="flex w-full items-center justify-between px-5 py-4 text-left text-sm font-medium text-codey-text"
+            onClick={() => setOpen(open === index ? null : index)}
+            className="flex w-full items-center justify-between gap-4 text-left"
           >
-            {item.q}
+            <span className="text-base font-medium text-codey-text">{item.q}</span>
             <ChevronDown
               className={`h-4 w-4 text-codey-text-dim transition-transform ${
-                open === i ? "rotate-180" : ""
+                open === index ? "rotate-180" : ""
               }`}
             />
           </button>
-          {open === i && (
-            <div className="px-5 pb-4 text-sm leading-relaxed text-codey-text-dim animate-fade-in">
+          {open === index && (
+            <p className="mt-3 max-w-2xl text-sm leading-relaxed text-codey-text-dim">
               {item.a}
-            </div>
+            </p>
           )}
         </div>
       ))}
@@ -268,14 +271,11 @@ function FAQ() {
   );
 }
 
-// ── Page ─────────────────────────────────────────────────────────────────────
-
 export default function LandingPage() {
   return (
-    <div className="relative min-h-screen bg-codey-bg text-codey-text">
+    <div className="relative min-h-screen overflow-hidden bg-codey-bg text-codey-text">
       <GridBackground />
 
-      {/* Nav */}
       <nav className="relative z-10 flex items-center justify-between px-6 py-5 md:px-12">
         <Link href="/" className="text-xl font-bold tracking-tight">
           <span className="text-codey-green">C</span>ODEY
@@ -283,7 +283,7 @@ export default function LandingPage() {
         <div className="flex items-center gap-4">
           <Link
             href="/pricing"
-            className="text-sm text-codey-text-dim hover:text-codey-text transition-colors"
+            className="text-sm text-codey-text-dim transition-colors hover:text-codey-text"
           >
             Pricing
           </Link>
@@ -291,169 +291,240 @@ export default function LandingPage() {
             Log in
           </Link>
           <Link href="/auth/signup" className="btn-primary text-sm">
-            Sign up free
+            Start managing repos
           </Link>
         </div>
       </nav>
 
-      {/* Hero */}
-      <section className="relative z-10 mx-auto max-w-5xl px-6 pb-20 pt-16 text-center md:pt-28">
-        <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-codey-border bg-codey-card px-4 py-1.5 text-xs text-codey-text-dim">
-          <Zap className="h-3 w-3 text-codey-green" />
-          Powered by structural health analysis
-        </div>
-        <h1 className="mx-auto max-w-4xl text-4xl font-bold leading-tight tracking-tight md:text-6xl">
-          The only coding AI that sees your entire codebase{" "}
-          <span className="text-gradient-green">as a network.</span>
-        </h1>
-        <p className="mx-auto mt-6 max-w-2xl text-lg text-codey-text-dim md:text-xl">
-          Codey maps dependencies, predicts cascading failures, and generates
-          code that strengthens your system — not just the file you are looking at.
-        </p>
-        <div className="mt-10 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
-          <Link
-            href="/auth/signup"
-            className="btn-primary px-8 py-3 text-base shadow-glow-green"
-          >
-            Start for free — no credit card
-            <ArrowRight className="h-4 w-4" />
-          </Link>
-          <Link
-            href="/pricing"
-            className="btn-secondary px-8 py-3 text-base"
-          >
-            View pricing
-          </Link>
+      <section className="relative z-10 px-6 pb-20 pt-10 md:px-12 md:pb-28 md:pt-16">
+        <div className="mx-auto grid max-w-7xl gap-12 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
+          <div className="max-w-2xl">
+            <div className="inline-flex items-center gap-2 rounded-full border border-codey-border bg-codey-card/60 px-4 py-2 text-[11px] uppercase tracking-[0.22em] text-codey-text-dim">
+              <Bot className="h-3.5 w-3.5 text-codey-green" />
+              Autonomous repository operations
+            </div>
+            <h1 className="mt-6 text-5xl font-bold leading-[0.95] tracking-tight md:text-7xl">
+              Codey runs the
+              <span className="block text-gradient-green">maintenance queue</span>
+              your repos never finish.
+            </h1>
+            <p className="mt-6 max-w-xl text-base leading-7 text-codey-text-dim md:text-lg">
+              Monitor every repository, surface real risk, queue the highest-value fixes,
+              and ship reviewable patches with structural context. Codey covers the
+              repo-work loop from scans and CI rescue through security, docs, and release
+              blockers. It is an operator for repo health, not a prettier prompt box.
+            </p>
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+              <Link href="/auth/signup" className="btn-primary px-8 py-3 text-base shadow-glow-green">
+                Connect your first repo
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+              <Link href="/dashboard/autonomous" className="btn-secondary px-8 py-3 text-base">
+                See autopilot controls
+              </Link>
+            </div>
+            <div className="mt-8 grid max-w-xl grid-cols-2 gap-4 text-sm text-codey-text-dim sm:grid-cols-4">
+              {[
+                "Recurring scans",
+                "CI rescue",
+                "Security passes",
+                "Release blockers",
+              ].map((item) => (
+                <div key={item} className="border-t border-codey-border pt-3">
+                  {item}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <OpsBoard />
         </div>
       </section>
 
-      {/* Live Demo */}
-      <section className="relative z-10 px-6 pb-28">
-        <LiveDemo />
-      </section>
-
-      {/* Features */}
-      <section className="relative z-10 mx-auto max-w-5xl px-6 pb-28">
-        <h2 className="mb-12 text-center text-3xl font-bold">
-          What makes Codey different
-        </h2>
-        <div className="grid gap-6 md:grid-cols-3">
-          {features.map((f) => (
-            <div
-              key={f.title}
-              className="card-hover group flex flex-col items-start gap-4"
-            >
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-codey-green/10 text-codey-green">
-                <f.icon className="h-5 w-5" />
+      <section className="relative z-10 mx-auto max-w-7xl px-6 pb-24 md:px-12">
+        <div className="grid gap-6 border-t border-codey-border pt-10 md:grid-cols-4">
+          {operatingLoop.map((item) => (
+            <div key={item.title} className="pr-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full border border-codey-border bg-codey-card/60">
+                <item.icon className="h-4 w-4 text-codey-green" />
               </div>
-              <h3 className="text-lg font-semibold">{f.title}</h3>
-              <p className="text-sm leading-relaxed text-codey-text-dim">
-                {f.desc}
+              <h2 className="mt-5 text-lg font-semibold text-codey-text">{item.title}</h2>
+              <p className="mt-2 text-sm leading-6 text-codey-text-dim">
+                {item.description}
               </p>
             </div>
           ))}
         </div>
       </section>
 
-      {/* Comparison */}
-      <section className="relative z-10 mx-auto max-w-4xl px-6 pb-28">
-        <h2 className="mb-12 text-center text-3xl font-bold">
-          Codey vs. the rest
-        </h2>
-        <div className="overflow-x-auto rounded-xl border border-codey-border">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-codey-border bg-codey-card text-left">
-                <th className="px-5 py-3 font-medium text-codey-text-dim">
-                  Feature
-                </th>
-                <th className="px-5 py-3 text-center font-medium text-codey-green">
-                  Codey
-                </th>
-                <th className="px-5 py-3 text-center font-medium text-codey-text-dim">
-                  Copilot
-                </th>
-                <th className="px-5 py-3 text-center font-medium text-codey-text-dim">
-                  Cursor
-                </th>
-                <th className="px-5 py-3 text-center font-medium text-codey-text-dim">
-                  Claude Code
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {compRows.map((row, i) => (
-                <tr
-                  key={row.feature}
-                  className={`border-b border-codey-border/50 ${
-                    i % 2 === 0 ? "bg-codey-bg" : "bg-codey-card/40"
-                  }`}
-                >
-                  <td className="px-5 py-3 text-codey-text">{row.feature}</td>
-                  <td className="px-5 py-3">
-                    <CellIcon value={row.codey} />
-                  </td>
-                  <td className="px-5 py-3">
-                    <CellIcon value={row.copilot} />
-                  </td>
-                  <td className="px-5 py-3">
-                    <CellIcon value={row.cursor} />
-                  </td>
-                  <td className="px-5 py-3">
-                    <CellIcon value={row.claude} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <section className="relative z-10 mx-auto max-w-7xl px-6 pb-24 md:px-12">
+        <div className="grid gap-10 lg:grid-cols-[0.9fr_1.1fr]">
+          <div>
+            <p className="text-xs uppercase tracking-[0.24em] text-codey-text-muted">
+              What Codey owns
+            </p>
+            <h2 className="mt-3 text-3xl font-bold tracking-tight md:text-4xl">
+              Built for repository stewardship, not one-off prompts.
+            </h2>
+            <p className="mt-4 max-w-xl text-sm leading-7 text-codey-text-dim">
+              The product is centered on fleets of repos, recurring maintenance, and
+              autonomous execution loops. Every surface should make operators faster at
+              deciding what to fix next and safer at letting Codey handle the routine work.
+            </p>
+          </div>
+          <div className="grid gap-5 md:grid-cols-2">
+            {[
+              "Watch dependency drift and aging branches across the fleet.",
+              "Surface hotspots using structural stress, blast radius, and failure history.",
+              "Queue interventions with repo context, scope, and expected impact already attached.",
+              "Run patch preparation, validation, and summaries without babysitting a chat thread.",
+            ].map((line) => (
+              <div key={line} className="border-t border-codey-border pt-4 text-sm leading-6 text-codey-text">
+                {line}
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 
-      {/* Pricing Preview */}
-      <section className="relative z-10 mx-auto max-w-3xl px-6 pb-28 text-center">
-        <h2 className="mb-4 text-3xl font-bold">Simple, transparent pricing</h2>
-        <p className="mb-8 text-codey-text-dim">
-          Start free. Scale when you need to.
-        </p>
-        <Link href="/pricing" className="btn-primary px-8 py-3 text-base">
-          See all plans
-          <ArrowRight className="h-4 w-4" />
-        </Link>
+      <section className="relative z-10 mx-auto max-w-7xl px-6 pb-24 md:px-12">
+        <div className="overflow-hidden rounded-[28px] border border-codey-border bg-codey-card/40">
+          <div className="border-b border-codey-border px-6 py-5">
+            <p className="text-xs uppercase tracking-[0.24em] text-codey-text-muted">
+              Full Repo-Work Coverage
+            </p>
+            <h2 className="mt-2 text-2xl font-bold">
+              Every lane in the repo lifecycle has an operator path.
+            </h2>
+            <p className="mt-3 max-w-3xl text-sm leading-7 text-codey-text-dim">
+              Codey is designed to cover the same repo work an elite maintenance operator
+              handles manually: scan, repair, refactor, verify, secure, document, and ship.
+              Continuous lanes stay watched. The rest are queued as focused runs.
+            </p>
+          </div>
+          <div className="divide-y divide-codey-border/60">
+            {repoWorkLanes.map((lane) => (
+              <div
+                key={lane.id}
+                className="grid gap-4 px-6 py-5 md:grid-cols-[0.9fr_1.2fr_1fr_0.7fr]"
+              >
+                <div>
+                  <p className="text-sm font-semibold text-codey-text">{lane.label}</p>
+                  <p className="mt-1 text-xs uppercase tracking-[0.18em] text-codey-text-muted">
+                    {lane.modeLabel}
+                  </p>
+                </div>
+                <p className="text-sm leading-6 text-codey-text-dim">{lane.summary}</p>
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-codey-text-muted">
+                    Signals
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-codey-text">
+                    {lane.signals}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-codey-text-muted">
+                    Returns
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-codey-text">
+                    {lane.output}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       </section>
 
-      {/* FAQ */}
-      <section className="relative z-10 mx-auto max-w-3xl px-6 pb-28">
-        <h2 className="mb-10 text-center text-3xl font-bold">
-          Frequently asked questions
+      <section className="relative z-10 mx-auto max-w-6xl px-6 pb-24 md:px-12">
+        <div className="overflow-hidden rounded-[28px] border border-codey-border bg-codey-card/40">
+          <div className="border-b border-codey-border px-6 py-5">
+            <p className="text-xs uppercase tracking-[0.24em] text-codey-text-muted">
+              Ops coverage
+            </p>
+            <h2 className="mt-2 text-2xl font-bold">Why teams move repo maintenance into Codey</h2>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-codey-border text-left text-codey-text-dim">
+                  <th className="px-6 py-4 font-medium">Capability</th>
+                  <th className="px-6 py-4 text-center font-medium text-codey-green">Codey</th>
+                  <th className="px-6 py-4 text-center font-medium">IDE copilots</th>
+                  <th className="px-6 py-4 text-center font-medium">CI only</th>
+                  <th className="px-6 py-4 text-center font-medium">Dependency bots</th>
+                </tr>
+              </thead>
+              <tbody>
+                {coverageRows.map((row, index) => (
+                  <tr
+                    key={row.feature}
+                    className={index % 2 === 0 ? "bg-codey-bg/30" : "bg-transparent"}
+                  >
+                    <td className="px-6 py-4 text-codey-text">{row.feature}</td>
+                    <td className="px-6 py-4"><CoverageIcon value={row.codey} /></td>
+                    <td className="px-6 py-4"><CoverageIcon value={row.copilots} /></td>
+                    <td className="px-6 py-4"><CoverageIcon value={row.ci} /></td>
+                    <td className="px-6 py-4"><CoverageIcon value={row.bots} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section className="relative z-10 mx-auto max-w-5xl px-6 pb-24 text-center md:px-12">
+        <p className="text-xs uppercase tracking-[0.24em] text-codey-text-muted">
+          Pricing
+        </p>
+        <h2 className="mt-3 text-3xl font-bold tracking-tight md:text-4xl">
+          Price the operator. Scale the repo fleet.
         </h2>
+        <p className="mx-auto mt-4 max-w-2xl text-sm leading-7 text-codey-text-dim">
+          Plans are sized around connected repositories, autonomous runs, and the amount
+          of maintenance Codey can execute for you each month.
+        </p>
+        <div className="mt-8">
+          <Link href="/pricing" className="btn-primary px-8 py-3 text-base">
+            View plans
+            <ArrowRight className="h-4 w-4" />
+          </Link>
+        </div>
+      </section>
+
+      <section className="relative z-10 mx-auto max-w-5xl px-6 pb-24 md:px-12">
+        <div className="mb-8 text-center">
+          <p className="text-xs uppercase tracking-[0.24em] text-codey-text-muted">
+            FAQ
+          </p>
+          <h2 className="mt-3 text-3xl font-bold tracking-tight">Common operator questions</h2>
+        </div>
         <FAQ />
       </section>
 
-      {/* Footer */}
-      <footer className="relative z-10 border-t border-codey-border bg-codey-card/30 px-6 py-12">
-        <div className="mx-auto flex max-w-5xl flex-col items-center gap-6 md:flex-row md:justify-between">
+      <footer className="relative z-10 border-t border-codey-border bg-codey-card/30 px-6 py-10 md:px-12">
+        <div className="mx-auto flex max-w-7xl flex-col gap-6 md:flex-row md:items-center md:justify-between">
           <div>
-            <span className="text-lg font-bold tracking-tight">
+            <p className="text-lg font-bold tracking-tight">
               <span className="text-codey-green">C</span>ODEY
-            </span>
+            </p>
             <p className="mt-1 text-xs text-codey-text-muted">
-              Qira LLC
+              Autonomous repository management by Qira LLC
             </p>
           </div>
           <div className="flex gap-6 text-sm text-codey-text-dim">
-            <Link href="/pricing" className="hover:text-codey-text transition-colors">
+            <Link href="/pricing" className="transition-colors hover:text-codey-text">
               Pricing
             </Link>
-            <Link href="/auth/login" className="hover:text-codey-text transition-colors">
+            <Link href="/auth/login" className="transition-colors hover:text-codey-text">
               Log in
             </Link>
-            <Link href="/auth/signup" className="hover:text-codey-text transition-colors">
-              Sign up
+            <Link href="/auth/signup" className="transition-colors hover:text-codey-text">
+              Start managing repos
             </Link>
           </div>
-          <p className="text-xs text-codey-text-muted">
-            &copy; {new Date().getFullYear()} Qira LLC. All rights reserved.
-          </p>
         </div>
       </footer>
     </div>

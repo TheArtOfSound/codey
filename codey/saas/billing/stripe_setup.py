@@ -1,8 +1,31 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+from typing import Any
 
-import stripe
+try:
+    import stripe
+except ModuleNotFoundError as exc:  # pragma: no cover - exercised in dependency-light tests
+    if exc.name != "stripe":
+        raise
+    _STRIPE_IMPORT_ERROR: ModuleNotFoundError | None = exc
+
+    def _raise_missing_stripe(*args, **kwargs):
+        raise RuntimeError("stripe is required for Stripe catalog setup") from _STRIPE_IMPORT_ERROR
+
+    class _MissingStripeResource:
+        create = staticmethod(_raise_missing_stripe)
+        list = staticmethod(_raise_missing_stripe)
+
+    class _MissingStripe:
+        api_key = ""
+        Product = _MissingStripeResource
+        Price = _MissingStripeResource
+
+    stripe: Any = _MissingStripe()
+else:  # pragma: no cover - depends on optional runtime dependency
+    _STRIPE_IMPORT_ERROR = None
 
 from codey.saas.billing.plans import PLANS, TOPUP_PACKAGES
 from codey.saas.config import settings
@@ -10,24 +33,106 @@ from codey.saas.config import settings
 logger = logging.getLogger(__name__)
 
 _METADATA_APP_KEY = "codey_entity"
+_catalog_lock = asyncio.Lock()
+_catalog_ready = False
+
+
+def _require_stripe() -> None:
+    if _STRIPE_IMPORT_ERROR is not None:
+        raise RuntimeError("stripe is required for Stripe catalog setup") from _STRIPE_IMPORT_ERROR
+
+
+def _has_ascii_control(value: str) -> bool:
+    return any(ord(char) < 32 or ord(char) == 127 for char in value)
+
+
+def _has_whitespace(value: str) -> bool:
+    return any(char.isspace() for char in value)
+
+
+def _coerce_non_empty_stripe_text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if _has_ascii_control(normalized) or _has_whitespace(normalized):
+        return None
+    return normalized or None
+
+
+def _metadata_lookup(metadata: object, key: str) -> str | None:
+    value: object | None
+    if metadata is None:
+        return None
+    if isinstance(metadata, dict):
+        value = metadata.get(key)
+    elif hasattr(metadata, "to_dict_recursive"):
+        try:
+            payload = metadata.to_dict_recursive()
+        except Exception:
+            return None
+        value = payload.get(key) if isinstance(payload, dict) else None
+    elif hasattr(metadata, "to_dict"):
+        try:
+            payload = metadata.to_dict()
+        except Exception:
+            return None
+        value = payload.get(key) if isinstance(payload, dict) else None
+    else:
+        try:
+            value = metadata[key]  # type: ignore[index]
+        except Exception:
+            value = getattr(metadata, key, None)
+    return _coerce_non_empty_stripe_text(value)
+
+
+def _catalog_has_ids() -> bool:
+    plans_ready = all(
+        plan["price_monthly"] == 0
+        or _coerce_non_empty_stripe_text(plan.get("stripe_price_id")) is not None
+        for plan in PLANS.values()
+    )
+    topups_ready = all(
+        _coerce_non_empty_stripe_text(pkg.get("stripe_price_id")) is not None
+        for pkg in TOPUP_PACKAGES.values()
+    )
+    return plans_ready and topups_ready
+
+
+async def ensure_stripe_catalog_loaded() -> bool:
+    global _catalog_ready
+
+    if _catalog_ready or _catalog_has_ids():
+        _catalog_ready = True
+        return True
+
+    async with _catalog_lock:
+        if _catalog_ready or _catalog_has_ids():
+            _catalog_ready = True
+            return True
+
+        await setup_stripe_products()
+        _catalog_ready = _catalog_has_ids()
+        return _catalog_ready
 
 
 async def setup_stripe_products() -> None:
-    # Set API key at call time, not import time — ensures secret file is loaded
-    import os
-    key = os.environ.get("STRIPE_SECRET_KEY", "")
-    if not key or key.startswith("mk_"):
-        key = settings.stripe_secret_key
-    stripe.api_key = key
-    logger.info("Stripe setup: key prefix=%s, length=%d", key[:7] if key else "NONE", len(key))
-    if not key or not key.startswith("sk_"):
-        logger.warning("Stripe setup skipped: key doesn't start with sk_ (got %s...)", key[:10] if key else "empty")
-        return
     """Create Stripe Products and Prices for all paid plans and top-up packages.
 
-    Safe to call multiple times — skips anything that already exists by checking
-    for a ``codey_entity`` metadata tag on existing products.
+    Safe to call multiple times by checking for existing ``codey_entity``
+    metadata tags on Stripe products.
     """
+    global _catalog_ready
+    # Set API key at call time, not import time — ensures secret file is loaded
+    import os
+    key = _coerce_non_empty_stripe_text(os.environ.get("STRIPE_SECRET_KEY")) or ""
+    if not key or key.startswith("mk_"):
+        key = _coerce_non_empty_stripe_text(settings.stripe_secret_key) or ""
+    stripe.api_key = key
+    if not key or not key.startswith("sk_"):
+        logger.warning("Stripe setup skipped: missing valid Stripe secret key")
+        _catalog_ready = False
+        return
+    _require_stripe()
     existing = _fetch_existing_products()
 
     # ---- subscription plans ------------------------------------------------
@@ -140,6 +245,8 @@ async def setup_stripe_products() -> None:
             pkg_key,
         )
 
+    _catalog_ready = _catalog_has_ids()
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -148,10 +255,11 @@ async def setup_stripe_products() -> None:
 
 def _fetch_existing_products() -> dict[str, stripe.Product]:
     """Return a dict mapping ``codey_entity`` metadata value -> Product."""
+    _require_stripe()
     result: dict[str, stripe.Product] = {}
     products = stripe.Product.list(limit=100, active=True)
     for product in products.auto_paging_iter():
-        entity = product.metadata.get(_METADATA_APP_KEY)
+        entity = _metadata_lookup(getattr(product, "metadata", None), _METADATA_APP_KEY)
         if entity:
             result[entity] = product
     return result
@@ -161,6 +269,7 @@ def _find_active_price(
     product_id: str, *, recurring: bool
 ) -> stripe.Price | None:
     """Find the first active price for a product, filtered by type."""
+    _require_stripe()
     prices = stripe.Price.list(product=product_id, active=True, limit=10)
     for price in prices.data:
         if recurring and price.recurring is not None:

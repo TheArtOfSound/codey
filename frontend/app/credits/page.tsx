@@ -26,6 +26,7 @@ import {
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface TopupPackage {
+  id: string;
   credits: number;
   price: number;
   perCredit: string;
@@ -33,10 +34,10 @@ interface TopupPackage {
 }
 
 const TOPUP_PACKAGES: TopupPackage[] = [
-  { credits: 100, price: 5, perCredit: "$0.050" },
-  { credits: 500, price: 20, perCredit: "$0.040", popular: true },
-  { credits: 1500, price: 50, perCredit: "$0.033" },
-  { credits: 5000, price: 140, perCredit: "$0.028" },
+  { id: "starter_pack", credits: 50, price: 9, perCredit: "$0.180" },
+  { id: "power_pack", credits: 200, price: 29, perCredit: "$0.145", popular: true },
+  { id: "pro_pack", credits: 600, price: 69, perCredit: "$0.115" },
+  { id: "team_pack", credits: 2000, price: 199, perCredit: "$0.100" },
 ];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -110,7 +111,7 @@ export default function CreditsPage() {
     setTopupLoading(true);
     setTopupError(null);
     try {
-      const result = await api.createTopup(pkg.credits);
+      const result = await api.createTopup(pkg.id);
       setClientSecret(result.client_secret);
     } catch (err) {
       setTopupError("Failed to initiate purchase. Please try again.");
@@ -157,11 +158,11 @@ export default function CreditsPage() {
     );
   }
 
-  const planTotal = balance?.plan_credits ?? 0;
+  const planTotal = balance?.subscription_credits ?? 0;
   const topupTotal = balance?.topup_credits ?? 0;
-  const totalCredits = planTotal + topupTotal;
-  const remaining = balance?.credits_remaining ?? 0;
-  const used = totalCredits - remaining;
+  const totalCredits = balance?.total ?? planTotal + topupTotal;
+  const remaining = totalCredits;
+  const used = balance?.used_this_month ?? 0;
   const usagePercent = totalCredits > 0 ? Math.round((used / totalCredits) * 100) : 0;
 
   return (
@@ -199,17 +200,12 @@ export default function CreditsPage() {
                   )}
                 </div>
               </div>
-              {balance?.next_refresh_at && (
-                <div className="text-right">
-                  <p className="text-xs text-codey-text-muted">Next refresh</p>
-                  <p className="text-sm font-medium text-codey-text">
-                    {new Date(balance.next_refresh_at).toLocaleDateString("en-US", {
-                      month: "long",
-                      day: "numeric",
-                    })}
-                  </p>
-                </div>
-              )}
+              <div className="text-right">
+                <p className="text-xs text-codey-text-muted">Monthly allocation</p>
+                <p className="text-sm font-medium text-codey-text">
+                  {(balance?.monthly_allocation ?? 0).toLocaleString()} credits
+                </p>
+              </div>
             </div>
 
             {/* Usage bar */}

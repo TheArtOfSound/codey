@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import uuid
 from datetime import datetime
 
@@ -10,6 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy import Float, Integer, String, case, cast, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from codey.saas.billing.plans import PLANS
 from codey.saas.auth.dependencies import get_current_user
 from codey.saas.database import get_db
 from codey.saas.models.coding_session import CodingSession
@@ -45,7 +47,8 @@ async def require_admin(
     if is_admin is True:
         return current_user
 
-    if current_user.plan != "enterprise":
+    plan = _coerce_non_empty_admin_text(getattr(current_user, "plan", None))
+    if (plan or "").lower() != "enterprise":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required",
@@ -114,12 +117,175 @@ class AnnouncementResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 _PLAN_MONTHLY_USD: dict[str, float] = {
-    "free": 0.0,
-    "starter": 9.0,
-    "pro": 29.0,
-    "team": 79.0,
-    "enterprise": 199.0,
+    plan: float(details.get("price_monthly", 0)) / 100.0
+    for plan, details in PLANS.items()
 }
+_PLAN_MONTHLY_USD.setdefault("enterprise", 199.0)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _serialize_admin_timestamp(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, str):
+        value = value.strip()
+        return value or None
+    return str(value)
+
+
+def _has_ascii_control(value: str) -> bool:
+    return any(ord(character) < 32 or ord(character) == 127 for character in value)
+
+
+def _coerce_non_empty_admin_text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if _has_ascii_control(value):
+        return None
+    return value or None
+
+
+def _coerce_admin_int(value: object, fallback: int = 0) -> int:
+    normalized: float
+    if isinstance(value, bool):
+        return fallback
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        normalized = value
+    elif isinstance(value, str):
+        try:
+            normalized = float(value.strip())
+        except ValueError:
+            return fallback
+    else:
+        return fallback
+    return int(normalized) if math.isfinite(normalized) else fallback
+
+
+def _coerce_admin_float(value: object, fallback: float = 0.0) -> float:
+    normalized: float
+    if isinstance(value, bool):
+        return fallback
+    if isinstance(value, (int, float)):
+        normalized = float(value)
+    elif isinstance(value, str):
+        try:
+            normalized = float(value.strip())
+        except ValueError:
+            return fallback
+    else:
+        return fallback
+    return normalized if math.isfinite(normalized) else fallback
+
+
+def _coerce_admin_row_list(value: object) -> list[object]:
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    return []
+
+
+def _user_to_search_result(user: User) -> UserSearchResult:
+    return UserSearchResult(
+        id=str(getattr(user, "id", "")),
+        email=_coerce_non_empty_admin_text(getattr(user, "email", None)) or "",
+        name=_coerce_non_empty_admin_text(getattr(user, "name", None)),
+        plan=(
+            _coerce_non_empty_admin_text(getattr(user, "plan", None)) or "free"
+        ).lower(),
+        credits_remaining=_coerce_admin_int(
+            getattr(user, "credits_remaining", None),
+            0,
+        ),
+        topup_credits=_coerce_admin_int(getattr(user, "topup_credits", None), 0),
+        created_at=_serialize_admin_timestamp(getattr(user, "created_at", None)) or "",
+        last_active=_serialize_admin_timestamp(getattr(user, "last_active", None)),
+    )
+
+
+def _credit_adjustment_to_response(
+    user_id: object,
+    user: User,
+    amount: object,
+    reason: object,
+) -> CreditAdjustmentResponse:
+    return CreditAdjustmentResponse(
+        user_id=str(user_id),
+        new_credits_remaining=_coerce_admin_int(
+            getattr(user, "credits_remaining", None),
+            0,
+        ),
+        new_topup_credits=_coerce_admin_int(getattr(user, "topup_credits", None), 0),
+        adjustment=_coerce_admin_int(amount, 0),
+        reason=_coerce_non_empty_admin_text(reason) or "",
+    )
+
+
+def _announcement_to_response(payload: object) -> AnnouncementResponse:
+    data = payload if isinstance(payload, dict) else {}
+    level = _coerce_non_empty_admin_text(data.get("level")) or "info"
+    if level not in {"info", "warning", "error"}:
+        level = "info"
+    return AnnouncementResponse(
+        message=_coerce_non_empty_admin_text(data.get("message")),
+        level=level,
+    )
+
+
+def _plan_breakdown_to_response(row: object) -> PlanBreakdown:
+    try:
+        plan_raw, count_raw = row[0], row[1]
+    except (TypeError, IndexError, KeyError):
+        plan_raw, count_raw = None, 0
+    return PlanBreakdown(
+        plan=(_coerce_non_empty_admin_text(plan_raw) or "free").lower(),
+        count=_coerce_admin_int(count_raw, 0),
+    )
+
+
+def _stats_to_response(
+    *,
+    total_users: object,
+    users_by_plan: list[object],
+    total_credits_used: object,
+    total_api_cost: object,
+    total_sessions: object,
+    signups_last_30: object,
+    paid_users: object,
+) -> AdminStatsResponse:
+    total_users_count = _coerce_admin_int(total_users, 0)
+    plan_breakdown = [_plan_breakdown_to_response(row) for row in users_by_plan]
+    mrr = sum(
+        _PLAN_MONTHLY_USD.get(plan.plan, 0.0) * plan.count
+        for plan in plan_breakdown
+    )
+    total_api_cost_usd = _coerce_admin_float(total_api_cost, 0.0)
+    gross_margin = ((mrr - total_api_cost_usd) / mrr * 100) if mrr > 0 else 0.0
+    paid_users_count = _coerce_admin_int(paid_users, 0)
+    conversion_rate = (
+        paid_users_count / total_users_count * 100
+        if total_users_count > 0
+        else 0.0
+    )
+
+    return AdminStatsResponse(
+        total_users=total_users_count,
+        users_by_plan=plan_breakdown,
+        mrr_usd=round(mrr, 2),
+        total_credits_used=_coerce_admin_int(total_credits_used, 0),
+        total_api_cost_usd=round(total_api_cost_usd, 2),
+        gross_margin=round(gross_margin, 2),
+        total_sessions=_coerce_admin_int(total_sessions, 0),
+        signups_last_30_days=_coerce_admin_int(signups_last_30, 0),
+        conversion_rate=round(conversion_rate, 2),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -144,14 +310,7 @@ async def get_admin_stats(
         .group_by(User.plan)
         .order_by(func.count(User.id).desc())
     )
-    users_by_plan = [
-        PlanBreakdown(plan=row[0], count=row[1]) for row in plan_result.all()
-    ]
-
-    # MRR — sum of active paying users' plan costs
-    mrr = sum(
-        _PLAN_MONTHLY_USD.get(pb.plan, 0.0) * pb.count for pb in users_by_plan
-    )
+    users_by_plan = _coerce_admin_row_list(plan_result.all())
 
     # Total credits used this month across all users
     credits_result = await db.execute(
@@ -163,10 +322,7 @@ async def get_admin_stats(
     cost_result = await db.execute(
         select(func.coalesce(func.sum(SessionCost.api_cost_usd), 0.0))
     )
-    total_api_cost = float(cost_result.scalar_one())
-
-    # Gross margin
-    gross_margin = ((mrr - total_api_cost) / mrr * 100) if mrr > 0 else 0.0
+    total_api_cost = cost_result.scalar_one()
 
     # Total sessions
     session_result = await db.execute(select(func.count(CodingSession.id)))
@@ -189,18 +345,15 @@ async def get_admin_stats(
         select(func.count(User.id)).where(User.plan != "free")
     )
     paid_users = paid_result.scalar_one()
-    conversion_rate = (paid_users / total_users * 100) if total_users > 0 else 0.0
 
-    return AdminStatsResponse(
+    return _stats_to_response(
         total_users=total_users,
         users_by_plan=users_by_plan,
-        mrr_usd=round(mrr, 2),
         total_credits_used=total_credits_used,
-        total_api_cost_usd=round(total_api_cost, 2),
-        gross_margin=round(gross_margin, 2),
+        total_api_cost=total_api_cost,
         total_sessions=total_sessions,
-        signups_last_30_days=signups_last_30,
-        conversion_rate=round(conversion_rate, 2),
+        signups_last_30=signups_last_30,
+        paid_users=paid_users,
     )
 
 
@@ -212,26 +365,18 @@ async def search_users(
     db: AsyncSession = Depends(get_db),
 ) -> list[UserSearchResult]:
     """Search users by email substring."""
+    if not isinstance(limit, int):
+        default_limit = getattr(limit, "default", 50)
+        limit = default_limit if isinstance(default_limit, int) else 50
+
     result = await db.execute(
         select(User)
         .where(User.email.ilike(f"%{search}%"))
         .order_by(User.created_at.desc())
         .limit(limit)
     )
-    users = result.scalars().all()
-    return [
-        UserSearchResult(
-            id=str(u.id),
-            email=u.email,
-            name=u.name,
-            plan=u.plan,
-            credits_remaining=u.credits_remaining,
-            topup_credits=u.topup_credits,
-            created_at=u.created_at.isoformat(),
-            last_active=u.last_active.isoformat() if u.last_active else None,
-        )
-        for u in users
-    ]
+    users = _coerce_admin_row_list(result.scalars().all())
+    return [_user_to_search_result(u) for u in users]
 
 
 @router.post("/users/{user_id}/credits", response_model=CreditAdjustmentResponse)
@@ -256,8 +401,8 @@ async def adjust_credits(
         )
 
     # Apply to topup_credits (admin adjustments are separate from plan credits)
-    new_topup = max(0, user.topup_credits + body.amount)
-    old_topup = user.topup_credits
+    old_topup = _coerce_admin_int(getattr(user, "topup_credits", None), 0)
+    new_topup = max(0, old_topup + body.amount)
     user.topup_credits = new_topup
 
     # Log the transaction
@@ -272,13 +417,7 @@ async def adjust_credits(
     db.add(tx)
     await db.flush()
 
-    return CreditAdjustmentResponse(
-        user_id=str(user_id),
-        new_credits_remaining=user.credits_remaining,
-        new_topup_credits=user.topup_credits,
-        adjustment=body.amount,
-        reason=body.reason,
-    )
+    return _credit_adjustment_to_response(user_id, user, body.amount, body.reason)
 
 
 @router.post("/announcement", response_model=AnnouncementResponse)
@@ -291,17 +430,13 @@ async def set_announcement(
     Pass ``message: null`` to clear the current announcement.
     """
     _announcement["message"] = body.message
-    _announcement["level"] = body.level if body.level in ("info", "warning", "error") else "info"
-    return AnnouncementResponse(
-        message=_announcement["message"],
-        level=_announcement["level"],
+    _announcement["level"] = (
+        body.level if body.level in ("info", "warning", "error") else "info"
     )
+    return _announcement_to_response(_announcement)
 
 
 @router.get("/announcement", response_model=AnnouncementResponse)
 async def get_announcement() -> AnnouncementResponse:
     """Get the current site-wide announcement (public endpoint)."""
-    return AnnouncementResponse(
-        message=_announcement["message"],
-        level=_announcement["level"],  # type: ignore[arg-type]
-    )
+    return _announcement_to_response(_announcement)

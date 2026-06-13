@@ -7,6 +7,10 @@ services:
     envVars:
       - key: DATABASE_URL
         sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: CODEY_ENV
+        value: production
       - key: SECRET_KEY
         generateValue: true
       - key: STRIPE_SECRET_KEY
@@ -18,5 +22,7 @@ services:
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: FRONTEND_URL
-        value: https://codey-app.vercel.app
+        value: https://codey.imagineqira.com
+      - key: API_URL
+        value: https://codey.imagineqira.com/api/proxy
     plan: free

@@ -101,10 +101,14 @@ class NFETSweep:
 
         # --- kappa: mean coupling density normalised to [0, 1] ---
         if file_nodes:
-            coupling_scores = [graph.coupling_score(nid) for nid in file_nodes]
+            coupling_scores = [
+                self._coerce_nonnegative_metric(graph.coupling_score(nid))
+                for nid in file_nodes
+            ]
             raw_mean_coupling = float(np.mean(coupling_scores))
             max_coupling = max(coupling_scores) if coupling_scores else 1.0
-            normaliser = max(max_coupling, self.kappa_max)
+            kappa_floor = self._coerce_nonnegative_metric(self.kappa_max, default=1.0)
+            normaliser = max(max_coupling, kappa_floor)
             kappa = raw_mean_coupling / normaliser if normaliser > 0 else 0.0
         else:
             coupling_scores = []
@@ -118,16 +122,14 @@ class NFETSweep:
         # the midpoint (stress == k => norm 0.5).
         _STRESS_SCALE = 10.0  # raw stress of 10 maps to 0.5
 
-        raw_stress_map: dict[str, float] = {}
+        raw_stress_map: dict[str, object] = {}
         for nid in graph._graph.nodes:
             raw = graph.stress_score(nid)
-            if not np.isfinite(raw):
-                raw = 1e6  # cap infinite
             raw_stress_map[nid] = raw
 
         stress_map: dict[str, float] = {}
         for nid, raw in raw_stress_map.items():
-            stress_map[nid] = raw / (raw + _STRESS_SCALE) if raw > 0 else 0.0
+            stress_map[nid] = self._normalize_stress(raw, scale=_STRESS_SCALE)
 
         sorted_stress = sorted(stress_map.items(), key=lambda x: x[1], reverse=True)
         top_stress = sorted_stress[:5]
@@ -148,8 +150,11 @@ class NFETSweep:
         # --- phase ---
         phase = self._classify_phase(es_score)
 
-        mean_coupling = graph.mean_coupling
-        mean_cohesion = graph.mean_cohesion
+        mean_coupling = self._coerce_nonnegative_metric(graph.mean_coupling)
+        mean_cohesion = self._coerce_nonnegative_metric(
+            graph.mean_cohesion,
+            maximum=1.0,
+        )
 
         return SweepResult(
             kappa=kappa,
@@ -240,17 +245,78 @@ class NFETSweep:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _coerce_nonnegative_metric(
+        value: object,
+        default: float = 0.0,
+        maximum: float = 1e6,
+    ) -> float:
+        try:
+            parsed = float(value)
+        except OverflowError:
+            return maximum
+        except (TypeError, ValueError):
+            return default
+        if not np.isfinite(parsed):
+            return maximum
+        if parsed < 0.0:
+            return default
+        return min(parsed, maximum)
+
+    @staticmethod
+    def _normalize_stress(raw_stress: object, scale: float = 10.0) -> float:
+        try:
+            raw = float(raw_stress)
+        except (OverflowError, TypeError, ValueError):
+            raw = 1e6
+        if not np.isfinite(raw):
+            raw = 1e6
+        try:
+            scale = float(scale)
+        except (OverflowError, TypeError, ValueError):
+            scale = 10.0
+        if not np.isfinite(scale) or scale <= 0:
+            scale = 10.0
+        return raw / (raw + scale) if raw > 0 else 0.0
+
     def _compute_es(self, kappa: float, sigma: float) -> float:
         """Compute the equilibrium score.
 
         ES = alpha * exp(-beta * (sigma - sigma_star)^2)
                      * (1 - |kappa - kappa_star| / kappa_max)
         """
-        gaussian = float(np.exp(-self.beta * (sigma - self.sigma_star) ** 2))
-        kappa_penalty = 1.0 - abs(kappa - self.kappa_star) / self.kappa_max if self.kappa_max > 0 else 1.0
+        try:
+            alpha = float(self.alpha)
+            beta = float(self.beta)
+            sigma_star = float(self.sigma_star)
+            kappa_star = float(self.kappa_star)
+            kappa_max = float(self.kappa_max)
+            kappa = float(kappa)
+            sigma = float(sigma)
+        except (OverflowError, TypeError, ValueError):
+            return 0.0
+        if not all(
+            np.isfinite(value)
+            for value in (alpha, beta, sigma_star, kappa_star, kappa_max, kappa, sigma)
+        ):
+            return 0.0
+
+        gaussian = float(np.exp(-beta * (sigma - sigma_star) ** 2))
+        if not np.isfinite(gaussian):
+            return 0.0
+        kappa_penalty = (
+            1.0 - abs(kappa - kappa_star) / kappa_max
+            if kappa_max > 0
+            else 1.0
+        )
         # Clamp kappa_penalty to [0, 1] in case kappa drifts beyond kappa_max
-        kappa_penalty = max(0.0, min(1.0, kappa_penalty))
-        return self.alpha * gaussian * kappa_penalty
+        kappa_penalty = (
+            max(0.0, min(1.0, kappa_penalty))
+            if np.isfinite(kappa_penalty)
+            else 0.0
+        )
+        score = alpha * gaussian * kappa_penalty
+        return score if np.isfinite(score) else 0.0
 
     @staticmethod
     def _classify_phase(es_score: float) -> Phase:

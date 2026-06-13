@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import re
 from dataclasses import dataclass, field
 from enum import Enum
@@ -101,6 +102,27 @@ _SPEED_KEYWORDS: list[str] = [
 ]
 
 
+def _coerce_int(value: object, fallback: int = 0) -> int:
+    if isinstance(value, bool) or value is None:
+        return fallback
+    try:
+        return int(value)
+    except (OverflowError, TypeError, ValueError):
+        return fallback
+
+
+def _coerce_float(value: object, fallback: float = 0.0) -> float:
+    if isinstance(value, bool) or value is None:
+        return fallback
+    try:
+        parsed = float(value)
+    except (OverflowError, TypeError, ValueError):
+        return fallback
+    if not math.isfinite(parsed):
+        return fallback
+    return parsed
+
+
 # ---------------------------------------------------------------------------
 # Router
 # ---------------------------------------------------------------------------
@@ -121,7 +143,14 @@ class TaskRouter:
         context = context or {}
         request_lower = request.lower()
 
-        task_type = self._classify_task_type(request_lower)
+        task_hint = context.get("task_hint")
+        if isinstance(task_hint, str):
+            try:
+                task_type = TaskType(task_hint)
+            except ValueError:
+                task_type = self._classify_task_type(request_lower)
+        else:
+            task_type = self._classify_task_type(request_lower)
         estimated_tokens = self._estimate_output_tokens(request_lower, context)
         execution_mode = self._select_mode(task_type, request_lower, context)
         temperature = self._select_temperature(task_type)
@@ -130,7 +159,7 @@ class TaskRouter:
         )
 
         # If the codebase is very large, prefer long-context model
-        codebase_tokens = context.get("codebase_tokens", 0)
+        codebase_tokens = _coerce_int(context.get("codebase_tokens"), 0)
         if codebase_tokens > 100_000 and task_type not in (
             TaskType.FAST_CODE,
             TaskType.DOCUMENTATION,
@@ -146,6 +175,10 @@ class TaskRouter:
             metadata={
                 "task_type": task_type.value,
                 "codebase_tokens": codebase_tokens,
+                "nfet_phase": context.get("nfet_phase", ""),
+                "nfet_hotspots": _coerce_int(context.get("nfet_hotspots"), 0),
+                "nfet_focus_risk": _coerce_float(context.get("nfet_focus_risk"), 0.0),
+                "nfet_goal_pressure": _coerce_float(context.get("nfet_goal_pressure"), 0.0),
             },
         )
         logger.info(
@@ -199,10 +232,31 @@ class TaskRouter:
     ) -> ExecutionMode:
         """Decide between single, parallel, or reason-then-implement."""
         user_mode = context.get("mode", "")
+        nfet_phase = str(context.get("nfet_phase", "")).lower()
+        nfet_hotspots = _coerce_int(context.get("nfet_hotspots"), 0)
+        nfet_focus_risk = _coerce_float(context.get("nfet_focus_risk"), 0.0)
+        surface = str(context.get("surface", "")).lower()
+
+        if surface == "prompt_workspace" and task_type in (
+            TaskType.CODE_GENERATION,
+            TaskType.DEBUGGING,
+            TaskType.DEFAULT,
+        ):
+            if user_mode == "quality":
+                return ExecutionMode.PARALLEL
+            return ExecutionMode.SINGLE
 
         # Fast mode always single
         if user_mode == "fast":
             return ExecutionMode.SINGLE
+
+        # Structurally risky states should force planning before implementation
+        if nfet_phase == "critical":
+            return ExecutionMode.REASON_THEN_IMPLEMENT
+        if nfet_phase == "caution" and nfet_focus_risk >= 0.55:
+            return ExecutionMode.REASON_THEN_IMPLEMENT
+        if nfet_hotspots >= 3 and task_type == TaskType.CODE_GENERATION:
+            return ExecutionMode.REASON_THEN_IMPLEMENT
 
         # Architecture and security benefit from reasoning first
         if task_type in (TaskType.ARCHITECTURE, TaskType.SECURITY):
@@ -242,6 +296,8 @@ class TaskRouter:
     ) -> tuple[str, str | None]:
         """Choose primary (and optionally secondary) model keys."""
         available = get_available_providers()
+        nfet_phase = str(context.get("nfet_phase", "")).lower()
+        surface = str(context.get("surface", "")).lower()
 
         # Map task type to model key
         primary_key = task_type.value
@@ -278,6 +334,14 @@ class TaskRouter:
                     secondary_key = primary_key
                     primary_key = c  # reasoning model becomes primary
                     break
+
+        if (
+            surface != "prompt_workspace"
+            and nfet_phase == "critical"
+            and MODELS["architecture"]["provider"] in available
+        ):
+            secondary_key = secondary_key or "code_generation"
+            primary_key = "architecture"
 
         # Speed override
         user_mode = context.get("mode", "")

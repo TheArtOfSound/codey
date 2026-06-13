@@ -1,6 +1,61 @@
 from __future__ import annotations
 
-from pydantic_settings import BaseSettings
+import math
+import os
+from typing import Any
+
+try:
+    from pydantic_settings import BaseSettings
+except ModuleNotFoundError as exc:
+    if exc.name != "pydantic_settings":
+        raise
+
+    class BaseSettings:  # type: ignore[no-redef]
+        """Minimal environment-backed fallback for lightweight local tooling."""
+
+        def __init__(self, **overrides: Any) -> None:
+            annotations: dict[str, Any] = {}
+            for cls in reversed(type(self).mro()):
+                annotations.update(getattr(cls, "__annotations__", {}))
+
+            for key in annotations:
+                if key.startswith("_"):
+                    continue
+                default = getattr(type(self), key, None)
+                value = overrides.get(
+                    key,
+                    os.environ.get(key.upper(), os.environ.get(key, default)),
+                )
+                setattr(self, key, self._coerce_settings_value(value, default))
+
+        @staticmethod
+        def _coerce_settings_value(value: Any, default: Any) -> Any:
+            if isinstance(default, bool) and not isinstance(value, bool):
+                if isinstance(value, str):
+                    return value.strip().lower() in {"1", "true", "yes", "on"}
+                return bool(value)
+            if isinstance(default, int) and not isinstance(default, bool):
+                if isinstance(value, bool):
+                    return default
+                if isinstance(value, int):
+                    return value
+                if isinstance(value, float) and not math.isfinite(value):
+                    return default
+                try:
+                    return int(value)
+                except (TypeError, ValueError, OverflowError):
+                    return default
+            if isinstance(default, str) and not isinstance(value, str):
+                return str(value)
+            return value
+
+from codey.saas.redis_url import normalize_redis_url
+
+_DEFAULT_REDIS_URL = "redis://localhost:6379"
+
+
+def _normalize_settings_redis_url(value: object) -> str:
+    return normalize_redis_url(value) or _DEFAULT_REDIS_URL
 
 
 class Settings(BaseSettings):
@@ -90,5 +145,5 @@ class Settings(BaseSettings):
         env_file = ("/etc/secrets/.env", ".env")
         extra = "ignore"
 
-
 settings = Settings()
+settings.redis_url = _normalize_settings_redis_url(settings.redis_url)

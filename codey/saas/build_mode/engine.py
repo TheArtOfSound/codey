@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import logging
 import os
+import re
 import tempfile
 import zipfile
 from collections.abc import AsyncGenerator
@@ -19,12 +20,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from codey.graph.engine import CodebaseGraph
 from codey.nfet.sweep import NFETSweep, Phase
 from codey.parser.extractor import LanguageParser
+from codey.saas.archive_utils import (
+    dedupe_archive_path,
+    safe_archive_path,
+    safe_artifact_name,
+)
 from codey.saas.build_mode.decomposer import TaskDecomposer, TaskNode
 from codey.saas.build_mode.generator import BuildContext, FileGenerator, GeneratedFile
+from codey.saas.build_mode.path_utils import normalize_plan_file_path
 from codey.saas.build_mode.planner import ProjectPlanner
 from codey.saas.build_mode.templates import TemplateLibrary
 from codey.saas.build_mode.validator import FileValidator
-from codey.saas.credits.service import CreditService
+from codey.saas.credits.service import CREDIT_COSTS, CreditService
 from codey.saas.models.build_checkpoint import BuildCheckpoint
 from codey.saas.models.build_file import BuildFile
 from codey.saas.models.build_project import BuildProject
@@ -34,6 +41,133 @@ logger = logging.getLogger(__name__)
 # NFET intervention thresholds
 _NFET_CAUTION_THRESHOLD = 0.5
 _NFET_CRITICAL_THRESHOLD = 0.3
+_URL_CREDENTIAL_RE = re.compile(
+    r"([A-Za-z][A-Za-z0-9+.-]*://)[^/@\s]+(?::[^/@\s]*)?@"
+)
+_URL_QUERY_SECRET_RE = re.compile(
+    r"(?i)([?&](?:api[_-]?key|access[_-]?token|auth[_-]?token|"
+    r"refresh[_-]?token|client[_-]?secret|token|secret|password)=)[^&\s]+"
+)
+_NAMED_SECRET_RE = re.compile(
+    r"(?i)(\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|"
+    r"refresh[_-]?token|client[_-]?secret|token|secret|password|authorization)"
+    r"\b\s*[:=]\s*(?:Bearer\s+)?[\"']?)[^\"'\s,}&]+"
+)
+_EMAIL_ADDRESS_RE = re.compile(
+    r"\b[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b"
+)
+
+
+def _redact_build_error(value: object) -> str:
+    text = str(value)
+    text = _URL_CREDENTIAL_RE.sub(r"\1***@", text)
+    text = _URL_QUERY_SECRET_RE.sub(r"\1***", text)
+    text = _NAMED_SECRET_RE.sub(r"\1***", text)
+    return _EMAIL_ADDRESS_RE.sub(r"***@\1", text)
+
+
+def _download_endpoint(project_id: UUID) -> str:
+    return f"/build/{project_id}/download/zip"
+
+
+def _coerce_mapping(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _coerce_phase_entries(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [entry for entry in value if isinstance(entry, dict)]
+
+
+def _coerce_plan_file_tree(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    file_tree: dict[str, Any] = {}
+    for path, file_type in value.items():
+        normalized_path = normalize_plan_file_path(path)
+        if normalized_path is None:
+            continue
+        file_tree[normalized_path] = file_type
+    return file_tree
+
+
+def _coerce_plan_phase_files(value: Any) -> list[str]:
+    if isinstance(value, str):
+        candidate = normalize_plan_file_path(value)
+        return [candidate] if candidate is not None else []
+    if not isinstance(value, list):
+        return []
+    files: list[str] = []
+    for raw in value:
+        candidate = normalize_plan_file_path(raw)
+        if candidate is not None:
+            files.append(candidate)
+    return files
+
+
+def _coerce_plan_phases(value: Any) -> list[dict[str, Any]]:
+    phases: list[dict[str, Any]] = []
+    for phase in _coerce_phase_entries(value):
+        normalized_phase = dict(phase)
+        if "files" in normalized_phase:
+            normalized_phase["files"] = _coerce_plan_phase_files(
+                normalized_phase.get("files")
+            )
+        phases.append(normalized_phase)
+    return phases
+
+
+def _coerce_project_name(value: Any) -> str:
+    if isinstance(value, str):
+        candidate = value.strip()
+        if candidate:
+            return candidate
+    return "project"
+
+
+def _coerce_plan_text(value: Any, default: str = "") -> str:
+    if isinstance(value, str):
+        candidate = value.strip()
+        return candidate or default
+    if isinstance(value, bytes):
+        candidate = value.decode("utf-8", errors="replace").strip()
+        return candidate or default
+    return default
+
+
+def _coerce_estimated_credits(value: Any) -> dict[str, int]:
+    fallback = CREDIT_COSTS["full_build"]
+    if not isinstance(value, dict):
+        return {"min": fallback, "max": fallback}
+
+    def _coerce_bound(raw: Any, default: int) -> int:
+        if isinstance(raw, bool):
+            return default
+        try:
+            parsed = int(raw)
+        except (OverflowError, TypeError, ValueError):
+            return default
+        return max(1, parsed)
+
+    minimum = _coerce_bound(value.get("min"), fallback)
+    maximum = _coerce_bound(value.get("max"), minimum)
+    if maximum < minimum:
+        maximum = minimum
+    return {"min": minimum, "max": maximum}
+
+
+def _coerce_build_plan(value: Any) -> dict[str, Any]:
+    plan = dict(value) if isinstance(value, dict) else {}
+    plan["name"] = _coerce_plan_text(plan.get("name"), "Untitled")
+    plan["description"] = _coerce_plan_text(plan.get("description"))
+    plan["stack"] = _coerce_mapping(plan.get("stack"))
+    plan["file_tree"] = _coerce_plan_file_tree(plan.get("file_tree"))
+    plan["phases"] = _coerce_plan_phases(plan.get("phases"))
+    plan["estimated_credits"] = _coerce_estimated_credits(
+        plan.get("estimated_credits")
+    )
+    return plan
 
 
 class BuildEngine:
@@ -69,22 +203,23 @@ class BuildEngine:
         The caller should present the plan for user approval before proceeding.
         """
         # Step 1a: Check if clarification is needed
-        clarification = await self.planner.clarify(description)
+        clarification = _coerce_mapping(await self.planner.clarify(description))
+        questions = clarification.get("questions")
 
-        if clarification.get("questions"):
+        if isinstance(questions, list) and questions:
             return {
                 "status": "needs_clarification",
-                "questions": clarification["questions"],
-                "defaults": clarification["defaults"],
+                "questions": questions,
+                "defaults": _coerce_mapping(clarification.get("defaults")),
                 "template_match": clarification.get("template_match"),
             }
 
         # Step 1b: Generate the plan (may use a template)
-        plan = await self.planner.create_plan(description)
+        plan = _coerce_build_plan(await self.planner.create_plan(description))
 
         # Step 1c: Check credits
-        estimated = plan.get("estimated_credits", {})
-        min_credits = estimated.get("min", 10)
+        estimated = plan["estimated_credits"]
+        min_credits = estimated["min"]
         has_credits = await self.credit_service.check_credits(
             self.user_id, min_credits
         )
@@ -118,10 +253,10 @@ class BuildEngine:
         answers: dict[str, str],
     ) -> dict[str, Any]:
         """Generate plan after clarification questions have been answered."""
-        plan = await self.planner.create_plan(description, answers)
+        plan = _coerce_build_plan(await self.planner.create_plan(description, answers))
 
-        estimated = plan.get("estimated_credits", {})
-        min_credits = estimated.get("min", 10)
+        estimated = plan["estimated_credits"]
+        min_credits = estimated["min"]
         has_credits = await self.credit_service.check_credits(
             self.user_id, min_credits
         )
@@ -173,10 +308,11 @@ class BuildEngine:
             yield {"status": "error", "message": "Project not found"}
             return
 
-        plan = project.project_plan
-        if not plan:
+        raw_plan = project.project_plan
+        if not raw_plan:
             yield {"status": "error", "message": "Project has no plan"}
             return
+        plan = _coerce_build_plan(raw_plan)
 
         # Update status
         project.status = "building"
@@ -247,10 +383,10 @@ class BuildEngine:
                     try:
                         generated = await self.generator.generate_file(task, context)
                     except Exception as e:
-                        last_error = str(e)
+                        last_error = _redact_build_error(e)
                         logger.warning(
                             "Generation attempt %d/%d failed for %s: %s",
-                            attempts, max_attempts, task.file_path, e,
+                            attempts, max_attempts, task.file_path, last_error,
                         )
                         continue
 
@@ -415,11 +551,15 @@ class BuildEngine:
                 f"Build Mode: {project.name} ({total_files_done} files)",
             )
         except Exception as e:
-            logger.error("Credit charge failed for build %s: %s", project_id, e)
+            logger.error(
+                "Credit charge failed for build %s: %s",
+                project_id,
+                _redact_build_error(e),
+            )
 
         # Package as zip
-        download_url = await self._package_project(project_id, context)
-        project.download_url = download_url
+        download_path = await self._package_project(project_id, context)
+        project.download_url = download_path
         project.status = "completed"
         project.completed_at = datetime.utcnow()
 
@@ -437,7 +577,7 @@ class BuildEngine:
             "lines_generated": total_lines,
             "credits_charged": int(total_credits),
             "nfet_final": context.nfet_state,
-            "download_url": download_url,
+            "download_url": _download_endpoint(project_id),
         }
 
     # ------------------------------------------------------------------
@@ -566,7 +706,11 @@ class BuildEngine:
             return sweep_result
 
         except Exception as e:
-            logger.warning("NFET update failed for %s: %s", file_path, e)
+            logger.warning(
+                "NFET update failed for %s: %s",
+                file_path,
+                _redact_build_error(e),
+            )
             return None
         finally:
             try:
@@ -639,23 +783,45 @@ class BuildEngine:
 
         Returns the path to the zip file (or a URL if uploaded to S3).
         """
+        if not context.generated_files:
+            raise ValueError("No generated files available to package")
+
         # Create zip in memory
         zip_buffer = io.BytesIO()
-        project_name = context.project_plan.get("name", "project").replace(" ", "_").lower()
+        project_name = _coerce_project_name(
+            _coerce_mapping(context.project_plan).get("name")
+        ).replace(" ", "_").lower()
 
+        seen_archive_paths: set[str] = set()
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-            for file_path, content in sorted(context.generated_files.items()):
+            for file_path, content in sorted(
+                context.generated_files.items(),
+                key=lambda item: str(item[0]),
+            ):
+                if not isinstance(content, (str, bytes)):
+                    content = str(content)
                 # Nest under project name directory
-                archive_path = f"{project_name}/{file_path}"
+                archive_path = dedupe_archive_path(
+                    safe_archive_path(file_path, prefix=project_name),
+                    seen_archive_paths,
+                )
                 zf.writestr(archive_path, content)
 
         # Write to temp directory (in production, this would upload to S3)
         output_dir = Path(tempfile.gettempdir()) / "codey_builds"
         output_dir.mkdir(exist_ok=True)
-        zip_path = output_dir / f"{project_name}_{project_id}.zip"
+        zip_path = output_dir / (
+            f"{safe_artifact_name(project_name, default='project')}_{project_id}.zip"
+        )
 
-        zip_path.write_bytes(zip_buffer.getvalue())
-        logger.info("Packaged build %s to %s (%d bytes)", project_id, zip_path, len(zip_buffer.getvalue()))
+        zip_bytes = zip_buffer.getvalue()
+        zip_path.write_bytes(zip_bytes)
+        logger.info(
+            "Packaged build %s to %s (%d bytes)",
+            project_id,
+            zip_path,
+            len(zip_bytes),
+        )
 
         return str(zip_path)
 
@@ -665,7 +831,7 @@ class BuildEngine:
 
     def _get_phase_info(self, plan: dict[str, Any], phase_num: int) -> dict[str, Any]:
         """Get phase metadata from the plan."""
-        phases = plan.get("phases", [])
+        phases = _coerce_phase_entries(_coerce_mapping(plan).get("phases"))
         if 0 <= phase_num < len(phases):
             return phases[phase_num]
         return {"name": f"Phase {phase_num}", "description": "", "files": []}

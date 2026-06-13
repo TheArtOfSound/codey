@@ -56,3 +56,15 @@ class CodingSession(Base):
 
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="coding_sessions")
+
+    @property
+    def output(self) -> Optional[str]:
+        return self.output_summary
+
+    @output.setter
+    def output(self, value: Optional[str]) -> None:
+        self.output_summary = value
+
+
+if not TYPE_CHECKING:
+    from codey.saas.models import user as _user  # noqa: F401

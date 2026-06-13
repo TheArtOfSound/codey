@@ -20,11 +20,11 @@ export default function PrivacyPage() {
             </p>
             <ul className="mt-2 list-inside list-disc space-y-1">
               <li>Email address and account credentials (hashed)</li>
-              <li>Prompts you submit for code generation</li>
-              <li>Generated code and project files</li>
+              <li>Run briefs, task instructions, and automation settings you submit</li>
+              <li>Generated patches, reports, and project files</li>
               <li>GitHub username and OAuth tokens (if connected)</li>
-              <li>Usage data: session history, credit usage, feature interactions</li>
-              <li>Memory preferences you set or that Codey learns from your sessions</li>
+              <li>Usage data: run history, credit usage, feature interactions</li>
+              <li>Memory preferences you set or that Codey learns from your runs</li>
               <li>Payment information (processed by Stripe; we never store full card numbers)</li>
             </ul>
           </section>
@@ -40,12 +40,12 @@ export default function PrivacyPage() {
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold text-codey-text">Prompt and Session History</h2>
+            <h2 className="text-lg font-semibold text-codey-text">Run and Session History</h2>
             <p className="mt-2">
-              Your prompts are stored to provide session history and to power features like
-              memory-based personalization. We do not use your prompts or generated code to
-              train AI models. Prompt history can be viewed in your dashboard and deleted
-              from the Settings page.
+              Your run briefs are stored to provide session history and to power features like
+              memory-based personalization. We do not use your run briefs or generated output to
+              train AI models. Run history can be viewed in your dashboard and deleted from the
+              Settings page.
             </p>
           </section>
 
@@ -53,7 +53,7 @@ export default function PrivacyPage() {
             <h2 className="text-lg font-semibold text-codey-text">We Do Not Sell Your Data</h2>
             <p className="mt-2">
               Qira LLC does not sell, rent, or share your personal data with third parties for
-              marketing purposes. We do not share your code, prompts, or usage data with anyone
+              marketing purposes. We do not share your code, run briefs, or usage data with anyone
               outside of Qira LLC, except as required by law or as described in this policy.
             </p>
           </section>
@@ -137,7 +137,7 @@ export default function PrivacyPage() {
             <h2 className="text-lg font-semibold text-codey-text">Data Retention</h2>
             <p className="mt-2">
               Account data is retained while your account is active. After account deletion, all
-              personal data, code, prompts, and session history are permanently deleted within
+              personal data, code, run briefs, and session history are permanently deleted within
               30 days. Anonymized aggregate usage statistics may be retained indefinitely.
             </p>
           </section>

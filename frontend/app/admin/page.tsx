@@ -25,12 +25,12 @@ import {
 
 interface AdminStats {
   total_users: number;
-  mrr: number;
-  credits_used_today: number;
-  api_costs_today: number;
-  margin_percent: number;
-  sessions_today: number;
-  signups_today: number;
+  mrr_usd: number;
+  total_credits_used: number;
+  total_api_cost_usd: number;
+  gross_margin: number;
+  total_sessions: number;
+  signups_last_30_days: number;
   conversion_rate: number;
 }
 
@@ -40,7 +40,7 @@ interface AdminUser {
   plan: string;
   credits_remaining: number;
   created_at: string;
-  sessions_count: number;
+  last_active: string | null;
 }
 
 // ── Stat Card ─────────────────────────────────────────────────────────────────
@@ -76,6 +76,7 @@ export default function AdminPage() {
   const { user } = useAuth();
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<AdminUser[]>([]);
   const [searching, setSearching] = useState(false);
@@ -86,6 +87,7 @@ export default function AdminPage() {
   const [adjustReason, setAdjustReason] = useState("");
   const [adjusting, setAdjusting] = useState(false);
   const [adjustSuccess, setAdjustSuccess] = useState(false);
+  const [adjustError, setAdjustError] = useState<string | null>(null);
 
   // Announcement banner
   const [bannerText, setBannerText] = useState("");
@@ -98,18 +100,9 @@ export default function AdminPage() {
       try {
         const data = await api.get<AdminStats>("/admin/stats");
         setStats(data);
-      } catch {
-        // Demo data
-        setStats({
-          total_users: 1247,
-          mrr: 18420,
-          credits_used_today: 34500,
-          api_costs_today: 892,
-          margin_percent: 68.4,
-          sessions_today: 412,
-          signups_today: 23,
-          conversion_rate: 12.8,
-        });
+      } catch (err) {
+        console.error("Failed to load admin stats:", err);
+        setError("Admin access required or admin data unavailable.");
       } finally {
         setLoading(false);
       }
@@ -121,20 +114,11 @@ export default function AdminPage() {
     if (!searchQuery.trim()) return;
     setSearching(true);
     try {
-      const results = await api.get<AdminUser[]>(`/admin/users?q=${encodeURIComponent(searchQuery)}`);
+      const results = await api.get<AdminUser[]>(`/admin/users?search=${encodeURIComponent(searchQuery)}`);
       setSearchResults(results);
-    } catch {
-      // Demo results
-      setSearchResults([
-        {
-          id: "u1",
-          email: `${searchQuery}@example.com`,
-          plan: "pro",
-          credits_remaining: 3200,
-          created_at: new Date(Date.now() - 2592000_000).toISOString(),
-          sessions_count: 47,
-        },
-      ]);
+    } catch (err) {
+      console.error("User search failed:", err);
+      setSearchResults([]);
     } finally {
       setSearching(false);
     }
@@ -143,6 +127,7 @@ export default function AdminPage() {
   async function handleAdjustCredits() {
     if (!adjustUser || !adjustAmount) return;
     setAdjusting(true);
+    setAdjustError(null);
     try {
       await api.post(`/admin/users/${adjustUser.id}/credits`, {
         amount: parseInt(adjustAmount),
@@ -155,14 +140,9 @@ export default function AdminPage() {
         setAdjustAmount("");
         setAdjustReason("");
       }, 1500);
-    } catch {
-      setAdjustSuccess(true);
-      setTimeout(() => {
-        setAdjustSuccess(false);
-        setAdjustUser(null);
-        setAdjustAmount("");
-        setAdjustReason("");
-      }, 1500);
+    } catch (err) {
+      console.error("Failed to adjust credits:", err);
+      setAdjustError("Failed to adjust credits.");
     } finally {
       setAdjusting(false);
     }
@@ -171,8 +151,13 @@ export default function AdminPage() {
   async function handleSaveBanner() {
     setBannerSaving(true);
     try {
-      await api.post("/admin/banner", { text: bannerText, active: bannerActive });
-    } catch {}
+      await api.post("/admin/announcement", {
+        message: bannerActive ? bannerText : null,
+        level: "info",
+      });
+    } catch (err) {
+      console.error("Failed to save announcement:", err);
+    }
     setBannerSaved(true);
     setTimeout(() => setBannerSaved(false), 2000);
     setBannerSaving(false);
@@ -185,6 +170,25 @@ export default function AdminPage() {
       </div>
     );
   }
+
+  if (error) {
+    return (
+      <div className="mx-auto max-w-3xl rounded-xl border border-codey-red/30 bg-codey-card p-6">
+        <h1 className="text-xl font-semibold text-codey-red">Admin Dashboard</h1>
+        <p className="mt-2 text-sm text-codey-text-dim">{error}</p>
+      </div>
+    );
+  }
+
+  const revenueShare =
+    stats && stats.mrr_usd > 0
+      ? Math.max(8, Math.min(100, Math.round((stats.total_api_cost_usd / stats.mrr_usd) * 100)))
+      : 0;
+  const conversionShare = stats ? Math.max(6, Math.min(100, Math.round(stats.conversion_rate))) : 0;
+  const signupMomentum =
+    stats && stats.total_users > 0
+      ? Math.max(6, Math.min(100, Math.round((stats.signups_last_30_days / stats.total_users) * 100)))
+      : 0;
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
@@ -206,41 +210,41 @@ export default function AdminPage() {
             icon={Users}
             label="Total Users"
             value={stats.total_users.toLocaleString()}
-            subtext={`+${stats.signups_today} today`}
+            subtext={`${stats.signups_last_30_days} signups in 30 days`}
           />
           <StatCard
             icon={DollarSign}
             label="MRR"
-            value={`$${stats.mrr.toLocaleString()}`}
+            value={`$${stats.mrr_usd.toLocaleString()}`}
             color="text-codey-green"
           />
           <StatCard
             icon={Zap}
-            label="Credits Used Today"
-            value={stats.credits_used_today.toLocaleString()}
-            subtext={`${stats.sessions_today} sessions`}
+            label="Credits Used"
+            value={stats.total_credits_used.toLocaleString()}
+            subtext={`${stats.total_sessions} sessions`}
           />
           <StatCard
             icon={Server}
-            label="API Costs Today"
-            value={`$${stats.api_costs_today.toLocaleString()}`}
+            label="API Costs"
+            value={`$${stats.total_api_cost_usd.toLocaleString()}`}
             color="text-codey-yellow"
           />
           <StatCard
             icon={TrendingUp}
             label="Margin"
-            value={`${stats.margin_percent}%`}
-            color={stats.margin_percent > 50 ? "text-codey-green" : "text-codey-yellow"}
+            value={`${stats.gross_margin}%`}
+            color={stats.gross_margin > 50 ? "text-codey-green" : "text-codey-yellow"}
           />
           <StatCard
             icon={Activity}
-            label="Sessions Today"
-            value={stats.sessions_today.toLocaleString()}
+            label="Sessions"
+            value={stats.total_sessions.toLocaleString()}
           />
           <StatCard
             icon={UserPlus}
-            label="Signups Today"
-            value={stats.signups_today.toLocaleString()}
+            label="Signups (30d)"
+            value={stats.signups_last_30_days.toLocaleString()}
           />
           <StatCard
             icon={CreditCard}
@@ -251,20 +255,74 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* Charts Placeholder */}
+      {/* Snapshot Charts */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="flex h-64 items-center justify-center rounded-xl border border-codey-border bg-codey-card">
-          <div className="text-center">
-            <BarChart3 className="mx-auto h-8 w-8 text-codey-text-muted" />
-            <p className="mt-2 text-sm text-codey-text-dim">Revenue Chart</p>
-            <p className="text-xs text-codey-text-muted">Coming soon</p>
+        <div className="rounded-xl border border-codey-border bg-codey-card p-6">
+          <div className="flex items-center gap-2">
+            <BarChart3 className="h-4 w-4 text-codey-text-dim" />
+            <h2 className="text-sm font-semibold text-codey-text">Revenue Snapshot</h2>
+          </div>
+          <div className="mt-5 space-y-4">
+            <div>
+              <div className="flex items-center justify-between text-xs text-codey-text-muted">
+                <span>MRR</span>
+                <span>${stats?.mrr_usd.toLocaleString()}</span>
+              </div>
+              <div className="mt-1.5 h-3 overflow-hidden rounded-full bg-codey-bg">
+                <div className="h-full w-full rounded-full bg-codey-green" />
+              </div>
+            </div>
+            <div>
+              <div className="flex items-center justify-between text-xs text-codey-text-muted">
+                <span>API cost share</span>
+                <span>{revenueShare}% of MRR</span>
+              </div>
+              <div className="mt-1.5 h-3 overflow-hidden rounded-full bg-codey-bg">
+                <div
+                  className="h-full rounded-full bg-codey-yellow transition-all"
+                  style={{ width: `${revenueShare}%` }}
+                />
+              </div>
+            </div>
+            <div className="rounded-lg border border-codey-border bg-codey-bg px-4 py-3 text-sm text-codey-text-dim">
+              Gross margin is currently <span className="font-semibold text-codey-text">{stats?.gross_margin}%</span>.
+            </div>
           </div>
         </div>
-        <div className="flex h-64 items-center justify-center rounded-xl border border-codey-border bg-codey-card">
-          <div className="text-center">
-            <BarChart3 className="mx-auto h-8 w-8 text-codey-text-muted" />
-            <p className="mt-2 text-sm text-codey-text-dim">Usage Chart</p>
-            <p className="text-xs text-codey-text-muted">Coming soon</p>
+
+        <div className="rounded-xl border border-codey-border bg-codey-card p-6">
+          <div className="flex items-center gap-2">
+            <BarChart3 className="h-4 w-4 text-codey-text-dim" />
+            <h2 className="text-sm font-semibold text-codey-text">Growth Snapshot</h2>
+          </div>
+          <div className="mt-5 space-y-4">
+            <div>
+              <div className="flex items-center justify-between text-xs text-codey-text-muted">
+                <span>Free-to-paid conversion</span>
+                <span>{stats?.conversion_rate}%</span>
+              </div>
+              <div className="mt-1.5 h-3 overflow-hidden rounded-full bg-codey-bg">
+                <div
+                  className="h-full rounded-full bg-codey-green transition-all"
+                  style={{ width: `${conversionShare}%` }}
+                />
+              </div>
+            </div>
+            <div>
+              <div className="flex items-center justify-between text-xs text-codey-text-muted">
+                <span>30-day signup momentum</span>
+                <span>{signupMomentum}% of total users</span>
+              </div>
+              <div className="mt-1.5 h-3 overflow-hidden rounded-full bg-codey-bg">
+                <div
+                  className="h-full rounded-full bg-codey-yellow transition-all"
+                  style={{ width: `${signupMomentum}%` }}
+                />
+              </div>
+            </div>
+            <div className="rounded-lg border border-codey-border bg-codey-bg px-4 py-3 text-sm text-codey-text-dim">
+              {stats?.signups_last_30_days.toLocaleString()} new accounts were created in the last 30 days.
+            </div>
           </div>
         </div>
       </div>
@@ -306,7 +364,7 @@ export default function AdminPage() {
                     <th className="py-2 pr-4 font-medium">Email</th>
                     <th className="py-2 pr-4 font-medium">Plan</th>
                     <th className="py-2 pr-4 font-medium">Credits</th>
-                    <th className="py-2 pr-4 font-medium">Sessions</th>
+                    <th className="py-2 pr-4 font-medium">Last Active</th>
                     <th className="py-2 pr-4 font-medium">Joined</th>
                     <th className="py-2 font-medium text-right">Actions</th>
                   </tr>
@@ -323,7 +381,9 @@ export default function AdminPage() {
                       <td className="py-3 pr-4 font-mono text-codey-text-dim">
                         {u.credits_remaining.toLocaleString()}
                       </td>
-                      <td className="py-3 pr-4 text-codey-text-dim">{u.sessions_count}</td>
+                      <td className="py-3 pr-4 text-codey-text-dim">
+                        {u.last_active ? new Date(u.last_active).toLocaleDateString() : "--"}
+                      </td>
                       <td className="py-3 pr-4 text-xs text-codey-text-muted">
                         {new Date(u.created_at).toLocaleDateString()}
                       </td>
@@ -431,6 +491,11 @@ export default function AdminPage() {
             </p>
 
             <div className="mt-4 space-y-3">
+              {adjustError && (
+                <div className="rounded-lg border border-codey-red/30 bg-codey-red-glow px-3 py-2 text-xs text-codey-red">
+                  {adjustError}
+                </div>
+              )}
               <div>
                 <label className="text-xs font-medium text-codey-text-dim">
                   Amount (positive to add, negative to remove)

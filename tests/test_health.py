@@ -1,15 +1,65 @@
 """Basic smoke tests for API health endpoints."""
+from datetime import datetime, timezone
+from types import SimpleNamespace
+import uuid
+
 import pytest
+import pytest_asyncio
+from fastapi import HTTPException, status
 from httpx import AsyncClient, ASGITransport
 
 from codey.saas.api.app import app
+from codey.saas.api.auth_routes import AuthService
+from codey.saas.auth.public_urls import FRONTEND_ORIGIN_HEADER
+from codey.saas.database import get_db
 
 
-@pytest.fixture
+class _NoDatabaseSession:
+    def add(self, _obj) -> None:
+        return None
+
+    async def flush(self) -> None:
+        return None
+
+    async def execute(self, *_args, **_kwargs):
+        raise AssertionError("Smoke test unexpectedly touched the real database")
+
+    async def commit(self) -> None:
+        return None
+
+    async def rollback(self) -> None:
+        return None
+
+
+def _smoke_user(email: str, name: str = "Test User") -> SimpleNamespace:
+    return SimpleNamespace(
+        id=uuid.uuid4(),
+        email=email,
+        name=name,
+        avatar_url=None,
+        github_id=None,
+        github_token=None,
+        plan="free",
+        plan_status="active",
+        credits_remaining=10,
+        topup_credits=0,
+        total_credits=10,
+        created_at=datetime.now(timezone.utc),
+    )
+
+
+@pytest_asyncio.fixture
 async def client():
+    async def _fake_get_db():
+        yield _NoDatabaseSession()
+
+    app.dependency_overrides[get_db] = _fake_get_db
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
-        yield c
+    try:
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            yield c
+    finally:
+        app.dependency_overrides.clear()
 
 
 @pytest.mark.asyncio
@@ -34,14 +84,21 @@ async def test_billing_plans(client):
 
 
 @pytest.mark.asyncio
-async def test_signup(client):
-    import uuid
+async def test_signup(client, monkeypatch):
     email = f"test_{uuid.uuid4().hex[:8]}@test.dev"
+
+    async def fake_signup(self, *, email: str, password: str, name: str | None, frontend_origin: str):
+        assert password == "TestPass1234"
+        assert frontend_origin == "http://test"
+        return _smoke_user(email=email, name=name or "Test User"), "test-token"
+
+    monkeypatch.setattr(AuthService, "signup", fake_signup)
+
     resp = await client.post("/auth/signup", json={
         "email": email,
         "password": "TestPass1234",
         "name": "Test User",
-    })
+    }, headers={FRONTEND_ORIGIN_HEADER: "http://test"})
     assert resp.status_code == 201
     data = resp.json()
     assert "token" in data
@@ -50,7 +107,17 @@ async def test_signup(client):
 
 
 @pytest.mark.asyncio
-async def test_login_invalid(client):
+async def test_login_invalid(client, monkeypatch):
+    async def fake_login(self, *, email: str, password: str):
+        assert email == "nonexistent@test.dev"
+        assert password == "wrong"
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+        )
+
+    monkeypatch.setattr(AuthService, "login", fake_login)
+
     resp = await client.post("/auth/login", json={
         "email": "nonexistent@test.dev",
         "password": "wrong",

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { Fragment, useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { api, type Session } from "@/lib/api";
 import {
   Clock,
@@ -16,6 +17,7 @@ import {
   Upload,
   Bot,
   Zap,
+  AlertTriangle,
 } from "lucide-react";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -57,7 +59,9 @@ function statusColor(status: Session["status"]): string {
   }
 }
 
-function modeFromPrompt(prompt: string): string {
+function modeFromSession(session: Session): string {
+  if (session.mode) return session.mode;
+  const prompt = session.prompt || "";
   if (prompt.startsWith("[autonomous]")) return "autonomous";
   if (prompt.startsWith("[analyze]")) return "analyze";
   return "prompt";
@@ -71,6 +75,19 @@ function modeIcon(mode: string) {
       return Upload;
     default:
       return Code;
+  }
+}
+
+function modeLabel(mode: string): string {
+  switch (mode) {
+    case "prompt":
+      return "queued run";
+    case "analyze":
+      return "repo scan";
+    case "autonomous":
+      return "autopilot";
+    default:
+      return mode;
   }
 }
 
@@ -95,12 +112,15 @@ export default function SessionsPage() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [modeFilter, setModeFilter] = useState<ModeFilter>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
   const loadSessions = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const data = await api.getSessions({
         limit: PAGE_SIZE,
@@ -111,6 +131,7 @@ export default function SessionsPage() {
       setTotal(data.total);
     } catch (err) {
       console.error("Failed to load sessions:", err);
+      setError("Failed to load session history.");
     } finally {
       setLoading(false);
     }
@@ -124,22 +145,36 @@ export default function SessionsPage() {
   const filteredSessions =
     modeFilter === "all"
       ? sessions
-      : sessions.filter((s) => modeFromPrompt(s.prompt) === modeFilter);
+      : sessions.filter((s) => modeFromSession(s) === modeFilter);
+  const visibleSessions = filteredSessions.filter((session) => {
+    const haystack = `${session.prompt} ${session.result_summary || ""}`.toLowerCase();
+    return haystack.includes(query.toLowerCase());
+  });
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-codey-text">Session History</h1>
+        <h1 className="text-2xl font-bold text-codey-text">Run History</h1>
         <p className="mt-1 text-sm text-codey-text-dim">
-          All your Codey sessions in one place. Click a row to expand.
+          All your Codey repo runs in one place. Click a row to expand.
         </p>
       </div>
 
       {/* ── Filters ────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-3">
         <Filter className="h-4 w-4 text-codey-text-muted" />
+
+        <div className="relative min-w-[220px] flex-1 sm:flex-none">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-codey-text-muted" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search run briefs and results"
+            className="w-full rounded-lg border border-codey-border bg-codey-card px-9 py-2 text-sm text-codey-text placeholder:text-codey-text-muted focus:border-codey-green focus:outline-none focus:ring-1 focus:ring-codey-green/30 sm:w-64"
+          />
+        </div>
 
         {/* Mode filter */}
         <div className="flex rounded-lg border border-codey-border">
@@ -157,7 +192,7 @@ export default function SessionsPage() {
                     : "text-codey-text-dim hover:bg-codey-card-hover hover:text-codey-text"
                 }`}
               >
-                {mode}
+                {mode === "all" ? "all" : modeLabel(mode)}
               </button>
             )
           )}
@@ -188,13 +223,18 @@ export default function SessionsPage() {
 
       {/* ── Sessions Table ─────────────────────────────────────────── */}
       <div className="rounded-xl border border-codey-border bg-codey-card">
+        {error && (
+          <div className="border-b border-codey-border px-5 py-4 text-sm text-codey-red">
+            {error}
+          </div>
+        )}
         {loading ? (
           <div className="flex h-48 items-center justify-center">
             <Loader2 className="h-5 w-5 animate-spin text-codey-green" />
           </div>
-        ) : filteredSessions.length === 0 ? (
+        ) : visibleSessions.length === 0 ? (
           <div className="px-5 py-16 text-center text-sm text-codey-text-dim">
-            No sessions found matching your filters.
+            No runs found matching your filters.
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -203,7 +243,7 @@ export default function SessionsPage() {
                 <tr className="border-b border-codey-border text-xs text-codey-text-muted">
                   <th className="px-5 py-3 font-medium">Date</th>
                   <th className="px-5 py-3 font-medium">Mode</th>
-                  <th className="px-5 py-3 font-medium">Prompt</th>
+                  <th className="px-5 py-3 font-medium">Brief</th>
                   <th className="px-5 py-3 font-medium">Status</th>
                   <th className="hidden px-5 py-3 font-medium md:table-cell">Credits</th>
                   <th className="hidden px-5 py-3 font-medium lg:table-cell">Health</th>
@@ -211,16 +251,15 @@ export default function SessionsPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredSessions.map((session) => {
+                {visibleSessions.map((session) => {
                   const isExpanded = expandedId === session.id;
-                  const mode = modeFromPrompt(session.prompt);
+                  const mode = modeFromSession(session);
                   const ModeIcon = modeIcon(mode);
                   const phase = healthPhase(session.health_score_after);
 
                   return (
-                    <>
+                    <Fragment key={session.id}>
                       <tr
-                        key={session.id}
                         onClick={() =>
                           setExpandedId(isExpanded ? null : session.id)
                         }
@@ -232,7 +271,7 @@ export default function SessionsPage() {
                         <td className="px-5 py-3">
                           <span className="flex items-center gap-1.5 text-xs capitalize text-codey-text-dim">
                             <ModeIcon className="h-3 w-3" />
-                            {mode}
+                            {modeLabel(mode)}
                           </span>
                         </td>
                         <td className="max-w-[250px] truncate px-5 py-3 text-codey-text">
@@ -287,7 +326,7 @@ export default function SessionsPage() {
                               {/* Full prompt */}
                               <div>
                                 <p className="text-xs font-medium uppercase tracking-wider text-codey-text-muted">
-                                  Full Prompt
+                                  Full Brief
                                 </p>
                                 <p className="mt-1 whitespace-pre-wrap rounded-lg bg-codey-card p-3 text-sm text-codey-text">
                                   {session.prompt}
@@ -298,11 +337,20 @@ export default function SessionsPage() {
                               {session.result_summary && (
                                 <div>
                                   <p className="text-xs font-medium uppercase tracking-wider text-codey-text-muted">
-                                    Output Summary
+                                    Stored Output
                                   </p>
                                   <p className="mt-1 rounded-lg bg-codey-card p-3 text-sm text-codey-text-dim">
                                     {session.result_summary}
                                   </p>
+                                </div>
+                              )}
+
+                              {session.error_message && (
+                                <div className="rounded-lg border border-codey-red/30 bg-codey-red-glow px-4 py-3 text-sm text-codey-red">
+                                  <div className="flex items-start gap-2">
+                                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                                    <span>{session.error_message}</span>
+                                  </div>
                                 </div>
                               )}
 
@@ -358,12 +406,55 @@ export default function SessionsPage() {
                                     </p>
                                   </div>
                                 )}
+                                <div className="rounded-lg bg-codey-card px-4 py-3">
+                                  <p className="text-xs text-codey-text-muted">
+                                    Lines Generated
+                                  </p>
+                                  <p className="mt-1 text-lg font-bold text-codey-text">
+                                    {session.lines_generated}
+                                  </p>
+                                </div>
+                                <div className="rounded-lg bg-codey-card px-4 py-3">
+                                  <p className="text-xs text-codey-text-muted">
+                                    Files Modified
+                                  </p>
+                                  <p className="mt-1 text-lg font-bold text-codey-text">
+                                    {session.files_modified}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="flex flex-wrap gap-3">
+                                {mode === "prompt" && (
+                                  <>
+                                    <Link
+                                      href={`/dashboard/prompt?session=${encodeURIComponent(session.id)}`}
+                                      className="rounded-lg border border-codey-green/30 bg-codey-green/10 px-4 py-2 text-sm font-medium text-codey-green transition-colors hover:bg-codey-green/20"
+                                    >
+                                      Open workspace
+                                    </Link>
+                                    <Link
+                                      href={`/dashboard/prompt?repo=${encodeURIComponent(session.repo_id || "")}`}
+                                      className="rounded-lg border border-codey-border px-4 py-2 text-sm text-codey-text-dim transition-colors hover:bg-codey-card-hover hover:text-codey-text"
+                                    >
+                                      New run with same repo
+                                    </Link>
+                                  </>
+                                )}
+                                {mode === "analyze" && (
+                                  <Link
+                                    href="/dashboard/analyze"
+                                    className="rounded-lg border border-codey-border px-4 py-2 text-sm text-codey-text-dim transition-colors hover:bg-codey-card-hover hover:text-codey-text"
+                                  >
+                                    Reopen analyze
+                                  </Link>
+                                )}
                               </div>
                             </div>
                           </td>
                         </tr>
                       )}
-                    </>
+                    </Fragment>
                   );
                 })}
               </tbody>

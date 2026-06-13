@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
+import { getWsBaseUrl } from "@/lib/runtime-config";
 import {
   Rocket,
   Server,
@@ -104,6 +105,21 @@ interface BuildPlan {
   estimated_lines: number;
 }
 
+interface BuildProjectStatusResponse {
+  id: string;
+  name: string | null;
+  status: string;
+  current_phase: number;
+  total_phases: number | null;
+  files_planned: number | null;
+  files_completed: number;
+  lines_generated: number;
+  credits_charged: number;
+  nfet_es_score_final: number | null;
+  nfet_phase_final: string | null;
+  download_url: string | null;
+}
+
 interface BuildFileStatus {
   id: string;
   file_path: string;
@@ -112,6 +128,10 @@ interface BuildFileStatus {
   status: "pending" | "generating" | "completed" | "failed";
   stress_score: number | null;
   validation_passed: boolean | null;
+}
+
+interface BuildFileDetail extends BuildFileStatus {
+  content: string | null;
 }
 
 interface StructuralHealth {
@@ -499,6 +519,7 @@ export default function BuildPage() {
   const [structuralHealth, setStructuralHealth] = useState<StructuralHealth | null>(null);
   const [interventionAlerts, setInterventionAlerts] = useState<string[]>([]);
   const [wsConnected, setWsConnected] = useState(false);
+  const [streamFallbackMessage, setStreamFallbackMessage] = useState<string | null>(null);
 
   // Checkpoint state
   const [checkpoint, setCheckpoint] = useState<CheckpointData | null>(null);
@@ -516,78 +537,18 @@ export default function BuildPage() {
   // WebSocket ref
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollBuildStatusRef = useRef<(pid: string) => Promise<void>>(async () => {});
 
   // Code output buffer ref for streaming
   const codeBufferRef = useRef<Map<string, string>>(new Map());
-
-  // ── WebSocket connection ────────────────────────────────────────────────────
-
-  const connectWebSocket = useCallback(
-    (pid: string) => {
-      if (wsRef.current) {
-        wsRef.current.onclose = null;
-        wsRef.current.close();
-      }
-
-      const token =
-        typeof window !== "undefined"
-          ? localStorage.getItem("codey_token")
-          : null;
-
-      const wsBase =
-        process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000";
-      const url = `${wsBase}/build/${pid}/stream${
-        token ? `?token=${encodeURIComponent(token)}` : ""
-      }`;
-
-      const ws = new WebSocket(url);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        setWsConnected(true);
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data) as BuildStreamMessage;
-          handleStreamMessage(msg);
-        } catch {
-          console.error("Failed to parse build stream message");
-        }
-      };
-
-      ws.onerror = () => {
-        setWsConnected(false);
-      };
-
-      ws.onclose = (event) => {
-        setWsConnected(false);
-        if (event.code !== 1000 && event.code !== 1008 && buildState === "BUILDING") {
-          reconnectTimerRef.current = setTimeout(() => {
-            connectWebSocket(pid);
-          }, 3000);
-        }
-      };
-    },
-    [buildState]
-  );
-
-  // Clean up WebSocket on unmount
-  useEffect(() => {
-    return () => {
-      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-      if (wsRef.current) {
-        wsRef.current.onclose = null;
-        wsRef.current.close();
-      }
-    };
-  }, []);
 
   // ── Stream message handler ──────────────────────────────────────────────────
 
   const handleStreamMessage = useCallback(
     (msg: BuildStreamMessage) => {
       const data = msg.data;
+      setStreamFallbackMessage(null);
 
       switch (msg.type) {
         case "status":
@@ -727,6 +688,185 @@ export default function BuildPage() {
     [activeFilePath]
   );
 
+  const clearBuildPolling = useCallback(() => {
+    if (pollTimerRef.current) {
+      clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleBuildPoll = useCallback((pid: string) => {
+    clearBuildPolling();
+    pollTimerRef.current = setTimeout(() => {
+      void pollBuildStatusRef.current(pid);
+    }, 5000);
+  }, [clearBuildPolling]);
+
+  const pollBuildStatus = useCallback(async (pid: string) => {
+    try {
+      const [project, files] = await Promise.all([
+        api.get<BuildProjectStatusResponse>(`/build/${pid}`),
+        api.get<BuildFileStatus[]>(`/build/${pid}/files`).catch(() => []),
+      ]);
+
+      setCurrentPhase(Math.max(1, project.current_phase || 1));
+      setFilesCompleted(project.files_completed || files.filter((file) => file.status === "completed").length);
+      setTotalFiles(project.files_planned || totalFiles || files.length);
+      setCreditsUsed(project.credits_charged || creditsUsed);
+      setLinesGenerated(project.lines_generated || linesGenerated);
+
+      const nextStatuses = new Map<string, BuildFileStatus>();
+      for (const file of files) {
+        nextStatuses.set(file.file_path, file);
+      }
+      setFileStatuses(nextStatuses);
+
+      const firstCompleted = files.find((file) => file.status === "completed");
+      if (firstCompleted && (!activeFilePath || !activeFileContent)) {
+        try {
+          const detail = await api.get<BuildFileDetail>(
+            `/build/${pid}/files/${firstCompleted.id}`
+          );
+          const content = detail.content || "";
+          codeBufferRef.current.set(detail.file_path, content);
+          setActiveFilePath(detail.file_path);
+          setActiveFileContent(content);
+          setActiveFileLineCount(content.split("\n").length);
+        } catch {
+          // Polling should still keep project-level progress visible.
+        }
+      }
+
+      if (project.nfet_es_score_final !== null || project.nfet_phase_final) {
+        setStructuralHealth({
+          es_score: project.nfet_es_score_final ?? 0,
+          coherence: project.nfet_es_score_final ?? 0,
+          stability: project.nfet_es_score_final ?? 0,
+          phase: project.nfet_phase_final || project.status,
+        });
+      }
+
+      if (project.status === "completed") {
+        clearBuildPolling();
+        setStreamFallbackMessage(null);
+        setCompletionStats({
+          total_files: project.files_completed || files.length,
+          total_lines: project.lines_generated,
+          languages: [
+            typeof plan?.stack.language === "string"
+              ? plan.stack.language
+              : "Unknown",
+          ],
+          test_coverage: 0,
+          health_grade: "B",
+          health_es_score: project.nfet_es_score_final ?? 0,
+          credits_charged: project.credits_charged,
+        });
+        setBuildState("COMPLETE");
+        return;
+      }
+
+      if (project.status === "failed" || project.status === "cancelled") {
+        clearBuildPolling();
+        setStreamFallbackMessage(null);
+        setInterventionAlerts((prev) => [
+          ...prev.slice(-4),
+          `Build ${project.status}. Check run logs before retrying.`,
+        ]);
+        return;
+      }
+
+      scheduleBuildPoll(pid);
+    } catch {
+      setStreamFallbackMessage("Build stream unavailable. Retrying status polling...");
+      scheduleBuildPoll(pid);
+    }
+  }, [
+    activeFileContent,
+    activeFilePath,
+    clearBuildPolling,
+    creditsUsed,
+    linesGenerated,
+    plan?.stack.language,
+    scheduleBuildPoll,
+    totalFiles,
+  ]);
+
+  useEffect(() => {
+    pollBuildStatusRef.current = pollBuildStatus;
+  }, [pollBuildStatus]);
+
+  const startBuildPolling = useCallback((pid: string, message: string) => {
+    setStreamFallbackMessage(message);
+    void pollBuildStatusRef.current(pid);
+  }, []);
+
+  // ── WebSocket connection ────────────────────────────────────────────────────
+
+  const connectWebSocket = useCallback(
+    (pid: string) => {
+      if (wsRef.current) {
+        wsRef.current.onclose = null;
+        wsRef.current.close();
+      }
+
+      const wsBase = getWsBaseUrl();
+      const url = `${wsBase}/build/${pid}/stream`;
+
+      const ws = new WebSocket(url);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        setWsConnected(true);
+        setStreamFallbackMessage(null);
+        clearBuildPolling();
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data) as BuildStreamMessage;
+          handleStreamMessage(msg);
+        } catch {
+          console.error("Failed to parse build stream message");
+        }
+      };
+
+      ws.onerror = () => {
+        setWsConnected(false);
+        startBuildPolling(
+          pid,
+          "Build stream unavailable. Polling project status instead."
+        );
+      };
+
+      ws.onclose = (event) => {
+        setWsConnected(false);
+        if (event.code !== 1000 && event.code !== 1008 && buildState === "BUILDING") {
+          startBuildPolling(
+            pid,
+            "Build stream disconnected. Polling project status while reconnecting."
+          );
+          reconnectTimerRef.current = setTimeout(() => {
+            connectWebSocket(pid);
+          }, 3000);
+        }
+      };
+    },
+    [buildState, clearBuildPolling, handleStreamMessage, startBuildPolling]
+  );
+
+  // Clean up WebSocket on unmount
+  useEffect(() => {
+    return () => {
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      clearBuildPolling();
+      if (wsRef.current) {
+        wsRef.current.onclose = null;
+        wsRef.current.close();
+      }
+    };
+  }, [clearBuildPolling]);
+
   // ── Handlers ────────────────────────────────────────────────────────────────
 
   async function handleStartPlanning() {
@@ -855,6 +995,8 @@ export default function BuildPage() {
     setCompletionStats(null);
     setReviewingCode(false);
     codeBufferRef.current.clear();
+    clearBuildPolling();
+    setStreamFallbackMessage(null);
   }
 
   function handleTemplateSelect(templateId: string) {
@@ -1400,6 +1542,12 @@ export default function BuildPage() {
 
             {/* Health Gauges */}
             <div className="space-y-4 border-b border-codey-border/50 px-4 py-4">
+              {streamFallbackMessage && (
+                <div className="rounded-lg border border-codey-yellow/20 bg-codey-yellow/5 px-3 py-2 text-[11px] text-codey-yellow">
+                  <WifiOff className="mb-0.5 mr-1 inline h-3 w-3" />
+                  {streamFallbackMessage}
+                </div>
+              )}
               <HealthGauge
                 label="Health Score"
                 value={structuralHealth?.es_score ?? 0}

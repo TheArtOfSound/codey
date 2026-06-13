@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import uuid
 from datetime import datetime, timedelta
 
@@ -42,6 +43,39 @@ VALID_ACTIONS: frozenset[str] = frozenset(
         ACTION_STRIPE_WEBHOOK,
     }
 )
+
+
+def _coerce_audit_float(value: object, fallback: float = 0.0) -> float:
+    if isinstance(value, bool):
+        return fallback
+    try:
+        parsed = float(value)
+    except (OverflowError, TypeError, ValueError):
+        return fallback
+    return parsed if math.isfinite(parsed) else fallback
+
+
+def _coerce_audit_count(value: object) -> int:
+    if isinstance(value, bool):
+        return 0
+    try:
+        parsed = int(value)
+    except (OverflowError, TypeError, ValueError):
+        return 0
+    return parsed if parsed > 0 else 0
+
+
+def _get_audit_row_value(row: object, index: int) -> object | None:
+    try:
+        return row[index]  # type: ignore[index]
+    except (TypeError, IndexError, KeyError):
+        return None
+
+
+def _coerce_audit_row_list(value: object) -> list[object]:
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    return []
 
 
 class AuditLogger:
@@ -105,7 +139,7 @@ class AuditLogger:
             .offset(offset)
         )
         result = await self._db.execute(stmt)
-        rows = result.scalars().all()
+        rows = _coerce_audit_row_list(result.scalars().all())
         return [self._row_to_dict(r) for r in rows]
 
     async def get_failed_logins(
@@ -159,9 +193,14 @@ class AuditLogger:
         result = await self._db.execute(
             stmt, {"uid": str(user_id), "cutoff": thirty_days_ago}
         )
-        for row in result.fetchall():
-            day, cnt, avg_cnt = row[0], row[1], float(row[2])
-            if avg_cnt > 0 and cnt > avg_cnt * 3:
+        for row in _coerce_audit_row_list(result.fetchall()):
+            day = _get_audit_row_value(row, 0)
+            cnt = _get_audit_row_value(row, 1)
+            if day is None or cnt is None:
+                continue
+            cnt_value = _coerce_audit_float(cnt)
+            avg_cnt = _coerce_audit_float(_get_audit_row_value(row, 2))
+            if avg_cnt > 0 and cnt_value > avg_cnt * 3:
                 alerts.append(
                     {
                         "type": "unusual_usage",
@@ -197,11 +236,14 @@ class AuditLogger:
             stmt_new_ip,
             {"uid": str(user_id), "recent": one_day_ago, "older": ninety_days_ago},
         )
-        for row in result.fetchall():
+        for row in _coerce_audit_row_list(result.fetchall()):
+            ip_address = _get_audit_row_value(row, 0)
+            if ip_address is None:
+                continue
             alerts.append(
                 {
                     "type": "new_login_ip",
-                    "detail": f"Login from previously unseen IP {row[0]}",
+                    "detail": f"Login from previously unseen IP {ip_address}",
                     "timestamp": datetime.utcnow().isoformat(),
                 }
             )
@@ -217,7 +259,9 @@ class AuditLogger:
                 SecurityAuditLog.created_at >= one_day_ago,
             )
         )
-        failure_count = (await self._db.execute(recent_failures)).scalar_one()
+        failure_count = _coerce_audit_count(
+            (await self._db.execute(recent_failures)).scalar_one()
+        )
         if failure_count >= 5:
             alerts.append(
                 {
@@ -234,6 +278,17 @@ class AuditLogger:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _serialize_audit_timestamp(value: object) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        return str(value)
+
+    @staticmethod
     def _row_to_dict(row: SecurityAuditLog) -> dict:
         return {
             "id": str(row.id),
@@ -246,5 +301,5 @@ class AuditLogger:
             "result": row.result,
             "failure_reason": row.failure_reason,
             "metadata": row.metadata_,
-            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "created_at": AuditLogger._serialize_audit_timestamp(row.created_at),
         }

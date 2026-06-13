@@ -27,14 +27,14 @@ interface Step {
 }
 
 const STEPS: Step[] = [
-  { number: 1, title: "Welcome to Codey", description: "Your AI coding engine" },
-  { number: 2, title: "Your First Prompt", description: "Tell Codey what to build" },
-  { number: 3, title: "Watch It Work", description: "Streaming code generation" },
-  { number: 4, title: "Your Result", description: "Production-ready code" },
-  { number: 5, title: "Go Further", description: "Unlock the full experience" },
+  { number: 1, title: "Welcome to Codey", description: "Your autonomous repo operator" },
+  { number: 2, title: "Your First Run", description: "Write a maintenance brief" },
+  { number: 3, title: "Watch It Work", description: "Streaming repo operation" },
+  { number: 4, title: "Your Result", description: "Patch plus operator notes" },
+  { number: 5, title: "Go Further", description: "Unlock the full repo loop" },
 ];
 
-const DEMO_PROMPT = "Build a REST API endpoint in FastAPI that accepts a JSON body with a list of URLs, fetches each one concurrently, and returns the HTTP status code for each.";
+const DEMO_PROMPT = "Add a FastAPI endpoint in this service that accepts a JSON body with a list of URLs, fetches each one concurrently, and returns the HTTP status code for each. Keep the change narrow, production-ready, and easy to review.";
 
 const DEMO_OUTPUT_LINES = [
   'from fastapi import FastAPI',
@@ -209,7 +209,7 @@ export default function OnboardingPage() {
               </p>
               <div className="mt-8 grid grid-cols-3 gap-4 text-center">
                 {[
-                  { icon: Code, label: "Generate Code", desc: "From prompts" },
+                  { icon: Code, label: "Queue Repo Work", desc: "From maintenance briefs" },
                   { icon: Terminal, label: "Health Analysis", desc: "Structural health" },
                   { icon: Sparkles, label: "Learns You", desc: "Adapts over time" },
                 ].map(({ icon: Icon, label, desc }) => (
@@ -223,7 +223,7 @@ export default function OnboardingPage() {
             </div>
           )}
 
-          {/* ── Step 2: First Prompt ────────────────────────────────────── */}
+          {/* ── Step 2: First Run ────────────────────────────────────── */}
           {step === 2 && (
             <div>
               <div className="flex items-center gap-3">
@@ -231,9 +231,9 @@ export default function OnboardingPage() {
                   <Code className="h-5 w-5 text-codey-green" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-bold text-codey-text">Write Your First Prompt</h2>
+                  <h2 className="text-lg font-bold text-codey-text">Write Your First Run Brief</h2>
                   <p className="text-sm text-codey-text-dim">
-                    Try editing this, or use it as-is.
+                    Tighten the brief around the repo work you want Codey to run.
                   </p>
                 </div>
               </div>
@@ -244,7 +244,7 @@ export default function OnboardingPage() {
                 className="mt-5 w-full rounded-lg border border-codey-border bg-codey-bg px-4 py-3 text-sm text-codey-text placeholder:text-codey-text-muted focus:border-codey-green focus:outline-none focus:ring-1 focus:ring-codey-green/30"
               />
               <p className="mt-2 text-xs text-codey-text-muted">
-                Pro tip: Be specific about the language, framework, and behavior you want.
+                Pro tip: Call out the target area, expected behavior, and how narrow the blast radius should stay.
               </p>
             </div>
           )}
@@ -259,7 +259,7 @@ export default function OnboardingPage() {
                 <div>
                   <h2 className="text-lg font-bold text-codey-text">Watch Codey Work</h2>
                   <p className="text-sm text-codey-text-dim">
-                    Code streams in real-time as Codey generates it.
+                    The run streams in real-time as Codey prepares the change.
                   </p>
                 </div>
               </div>
@@ -344,14 +344,14 @@ export default function OnboardingPage() {
             </div>
           )}
 
-          {/* ── Step 5: Upgrade Prompt ──────────────────────────────────── */}
+          {/* ── Step 5: Upgrade Path ──────────────────────────────────── */}
           {step === 5 && (
             <div className="text-center">
               <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-2xl bg-codey-green/10">
                 <Zap className="h-10 w-10 text-codey-green" />
               </div>
               <h2 className="mt-6 text-2xl font-bold text-codey-text">
-                You&apos;re Ready to Build
+                You&apos;re Ready to Run the Repo
               </h2>
               <p className="mt-3 text-sm text-codey-text-dim">
                 You have {user?.credits_remaining ?? 500} credits to start. Upgrade to Pro for
@@ -364,7 +364,7 @@ export default function OnboardingPage() {
                   className="flex w-full items-center justify-center gap-2 rounded-lg bg-codey-green px-6 py-3 text-sm font-semibold text-codey-bg transition-all hover:shadow-glow-green"
                 >
                   <Code className="h-4 w-4" />
-                  Start Building
+                  Open Intervention Console
                 </button>
                 <button
                   onClick={() => router.push("/pricing")}

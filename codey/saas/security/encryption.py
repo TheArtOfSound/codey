@@ -5,9 +5,27 @@ import hashlib
 import os
 import secrets
 import string
+from typing import Any
 
-import bcrypt
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+try:
+    import bcrypt
+except ModuleNotFoundError as exc:  # pragma: no cover - exercised in dependency-light tests
+    if exc.name != "bcrypt":
+        raise
+    _BCRYPT_IMPORT_ERROR: ModuleNotFoundError | None = exc
+    bcrypt: Any = None
+else:  # pragma: no cover - depends on optional runtime dependency
+    _BCRYPT_IMPORT_ERROR = None
+
+try:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+except ModuleNotFoundError as exc:  # pragma: no cover - exercised in dependency-light tests
+    if exc.name != "cryptography":
+        raise
+    _CRYPTOGRAPHY_IMPORT_ERROR: ModuleNotFoundError | None = exc
+    AESGCM: Any = None
+else:  # pragma: no cover - depends on optional runtime dependency
+    _CRYPTOGRAPHY_IMPORT_ERROR = None
 
 from codey.saas.config import settings
 
@@ -19,6 +37,16 @@ from codey.saas.config import settings
 
 _KDF_SALT = b"codey-saas-encryption-v1"  # fixed salt; rotation requires re-encrypt
 _KDF_ITERATIONS = 480_000  # OWASP 2023 recommendation for PBKDF2-SHA256
+
+
+def _require_bcrypt() -> None:
+    if _BCRYPT_IMPORT_ERROR is not None:
+        raise RuntimeError("bcrypt is required for API key hashing") from _BCRYPT_IMPORT_ERROR
+
+
+def _require_cryptography() -> None:
+    if _CRYPTOGRAPHY_IMPORT_ERROR is not None:
+        raise RuntimeError("cryptography is required for token encryption") from _CRYPTOGRAPHY_IMPORT_ERROR
 
 
 def _derive_key() -> bytes:
@@ -43,6 +71,8 @@ def encrypt_token(plaintext: str) -> str:
 
     The output format is ``base64(nonce ‖ ciphertext ‖ tag)``.
     """
+    _require_cryptography()
+    assert AESGCM is not None
     key = _derive_key()
     nonce = os.urandom(_NONCE_BYTES)
     aesgcm = AESGCM(key)
@@ -53,6 +83,8 @@ def encrypt_token(plaintext: str) -> str:
 
 def decrypt_token(ciphertext: str) -> str:
     """Decrypt a value produced by :func:`encrypt_token`."""
+    _require_cryptography()
+    assert AESGCM is not None
     key = _derive_key()
     raw = base64.urlsafe_b64decode(ciphertext)
     if len(raw) < _NONCE_BYTES + 16:
@@ -72,11 +104,15 @@ _BCRYPT_ROUNDS = 12
 
 def hash_api_key(key: str) -> str:
     """Return a bcrypt hash of *key* suitable for database storage."""
+    _require_bcrypt()
+    assert bcrypt is not None
     return bcrypt.hashpw(key.encode("utf-8"), bcrypt.gensalt(rounds=_BCRYPT_ROUNDS)).decode("ascii")
 
 
 def verify_api_key(key: str, hashed: str) -> bool:
     """Check *key* against a bcrypt *hashed* value."""
+    _require_bcrypt()
+    assert bcrypt is not None
     return bcrypt.checkpw(key.encode("utf-8"), hashed.encode("ascii"))
 
 

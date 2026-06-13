@@ -1,26 +1,54 @@
 from __future__ import annotations
 
+import json
+import math
+import re
+import shutil
 import uuid
 import zipfile
 import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from codey.saas.auth.dependencies import get_current_user
-from codey.saas.auth.jwt import decode_access_token
+from codey.saas.auth.websockets import authenticate_websocket
+from codey.saas.archive_utils import (
+    dedupe_archive_path,
+    safe_archive_path,
+    safe_artifact_name,
+)
 from codey.saas.build_mode.engine import BuildEngine
+from codey.saas.build_mode.path_utils import normalize_plan_file_path
 from codey.saas.credits.service import CreditService, InsufficientCreditsError, CREDIT_COSTS
 from codey.saas.database import get_db
 from codey.saas.intelligence.providers import call_model, resolve_model
 from codey.saas.models import BuildCheckpoint, BuildFile, BuildProject, User
 
 router = APIRouter(prefix="/build", tags=["build"])
+
+_URL_CREDENTIAL_RE = re.compile(
+    r"([A-Za-z][A-Za-z0-9+.-]*://)[^/@\s]+(?::[^/@\s]*)?@"
+)
+_URL_QUERY_SECRET_RE = re.compile(
+    r"(?i)([?&](?:api[_-]?key|access[_-]?token|auth[_-]?token|"
+    r"refresh[_-]?token|client[_-]?secret|token|secret|password)=)[^&\s]+"
+)
+_NAMED_SECRET_RE = re.compile(
+    r"(?i)(\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|"
+    r"refresh[_-]?token|client[_-]?secret|token|secret|password|authorization)"
+    r"\b\s*[:=]\s*(?:Bearer\s+)?[\"']?)[^\"'\s,}&]+"
+)
+_EMAIL_ADDRESS_RE = re.compile(
+    r"\b[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -164,6 +192,115 @@ class TemplateInfo(BaseModel):
     files_count: int
 
 
+def _coerce_answer_mapping(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    answers: dict[str, str] = {}
+    for key, raw in value.items():
+        if not isinstance(key, str):
+            continue
+        if isinstance(raw, str):
+            answers[key] = raw
+        elif raw is not None:
+            answers[key] = str(raw)
+    return answers
+
+
+def _coerce_plan_mapping(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _coerce_plan_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return ""
+
+
+def _extract_plan_mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return _coerce_plan_mapping(value)
+
+    text = _coerce_plan_text(value).strip()
+    if not text:
+        return {}
+
+    try:
+        return _coerce_plan_mapping(json.loads(text))
+    except json.JSONDecodeError:
+        pass
+
+    if "```" in text:
+        import re
+
+        match = re.search(r"```(?:json)?\s*\n(.*?)```", text, re.DOTALL)
+        if match:
+            try:
+                return _coerce_plan_mapping(json.loads(match.group(1)))
+            except json.JSONDecodeError:
+                pass
+
+    first_brace = text.find("{")
+    last_brace = text.rfind("}")
+    if first_brace != -1 and last_brace > first_brace:
+        try:
+            return _coerce_plan_mapping(json.loads(text[first_brace : last_brace + 1]))
+        except json.JSONDecodeError:
+            pass
+
+    return {}
+
+
+def _coerce_phase_entries(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [entry for entry in value if isinstance(entry, dict)]
+
+
+def _coerce_phase_name(value: Any, fallback: str) -> str:
+    if isinstance(value, str):
+        candidate = value.strip()
+        if candidate:
+            return candidate
+    return fallback
+
+
+def _coerce_phase_files(value: Any) -> list[str]:
+    if isinstance(value, str):
+        candidate = normalize_plan_file_path(value)
+        return [candidate] if candidate else []
+    if not isinstance(value, list):
+        return []
+    files: list[str] = []
+    seen: set[str] = set()
+    for raw in value:
+        candidate = normalize_plan_file_path(raw)
+        if candidate and candidate not in seen:
+            seen.add(candidate)
+            files.append(candidate)
+    return files
+
+
+def _coerce_estimated_credits(value: Any, fallback: int) -> int:
+    if isinstance(value, bool) or value is None:
+        return fallback
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return fallback
+    return max(1, min(parsed, 10_000))
+
+
+def _default_build_plan_phases(total_phases: int) -> list[dict[str, Any]]:
+    return [
+        {"name": "Project Setup & Configuration", "files": ["requirements.txt", "pyproject.toml", ".env.example", "Dockerfile"]},
+        {"name": "Core Data Models & Database", "files": ["app/models.py", "app/database.py", "migrations/init.sql"]},
+        {"name": "Business Logic & API", "files": ["app/main.py", "app/routes.py", "app/services.py", "app/auth.py"]},
+        {"name": "Tests & Documentation", "files": ["tests/test_routes.py", "tests/test_services.py", "README.md"]},
+    ][:total_phases]
+
+
 # ---------------------------------------------------------------------------
 # Templates registry
 # ---------------------------------------------------------------------------
@@ -254,6 +391,14 @@ async def _get_project(
     user: User,
     db: AsyncSession,
 ) -> BuildProject:
+    return await _get_project_for_user_id(project_id, user.id, db)
+
+
+async def _get_project_for_user_id(
+    project_id: str,
+    user_id: str | uuid.UUID,
+    db: AsyncSession,
+) -> BuildProject:
     try:
         pid = uuid.UUID(project_id)
     except ValueError:
@@ -262,9 +407,17 @@ async def _get_project(
             detail="Invalid project ID format",
         )
 
+    try:
+        uid = user_id if isinstance(user_id, uuid.UUID) else uuid.UUID(str(user_id))
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid user ID format",
+        )
+
     stmt = select(BuildProject).where(
         BuildProject.id == pid,
-        BuildProject.user_id == user.id,
+        BuildProject.user_id == uid,
     )
     result = await db.execute(stmt)
     project = result.scalar_one_or_none()
@@ -278,54 +431,387 @@ async def _get_project(
     return project
 
 
+def _download_endpoint(project_id: str) -> str:
+    return f"/build/{project_id}/download/zip"
+
+
+async def _generate_project_zip(
+    project: BuildProject,
+    db: AsyncSession,
+) -> tuple[Path, int]:
+    stmt = select(BuildFile).where(
+        BuildFile.project_id == project.id,
+        BuildFile.status == "completed",
+    )
+    result = await db.execute(stmt)
+    files = _coerce_build_row_list(result.scalars().all())
+    if not files:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No completed build files available for download",
+        )
+
+    temp_dir = Path(tempfile.mkdtemp(prefix="codey_build_"))
+    zip_path = temp_dir / safe_artifact_name(
+        project.name,
+        default="project",
+        suffix=".zip",
+    )
+
+    previous_download_url = getattr(project, "download_url", None)
+    cleanup_temp_dir = True
+    try:
+        written_files = 0
+        seen_archive_paths: set[str] = set()
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for build_file in files:
+                content = getattr(build_file, "content", None)
+                if content is None:
+                    continue
+                if not isinstance(content, (str, bytes)):
+                    content = str(content)
+                archive_path = dedupe_archive_path(
+                    safe_archive_path(build_file.file_path),
+                    seen_archive_paths,
+                )
+                zf.writestr(
+                    archive_path,
+                    content,
+                )
+                written_files += 1
+
+        if written_files == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No completed build files available for download",
+            )
+
+        size = zip_path.stat().st_size
+        project.download_url = str(zip_path)
+        await db.flush()
+        cleanup_temp_dir = False
+        return zip_path, size
+    finally:
+        if cleanup_temp_dir:
+            if getattr(project, "download_url", None) == str(zip_path):
+                project.download_url = previous_download_url
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def _cleanup_generated_zip(zip_path: Path) -> None:
+    try:
+        zip_path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+    # Request-scoped downloads are generated in their own temp directories
+    # (``codey_build_*``). Build-engine artifacts may live in a shared
+    # ``codey_builds`` directory and must not trigger a full parent wipe.
+    try:
+        parent = zip_path.parent.resolve(strict=False)
+        temp_root = Path(tempfile.gettempdir()).resolve(strict=False)
+    except OSError:
+        return
+    if (
+        zip_path.parent.name.startswith("codey_build_")
+        and temp_root in {parent, *parent.parents}
+    ):
+        shutil.rmtree(zip_path.parent, ignore_errors=True)
+
+
+def _serialize_build_timestamp(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, str):
+        value = value.strip()
+        return value or None
+    return str(value)
+
+
+def _coerce_build_text(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value or None
+
+
+def _coerce_build_content(value: Any) -> str | None:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return None
+
+
+def _has_ascii_control(value: str) -> bool:
+    return any(ord(char) < 32 or ord(char) == 127 for char in value)
+
+
+def _coerce_build_public_url(value: Any) -> str | None:
+    url = _coerce_build_text(value)
+    if url is None or _has_ascii_control(url):
+        return None
+    if "?" in url or "#" in url:
+        return None
+    try:
+        parsed = urlparse(url)
+        port = parsed.port
+    except ValueError:
+        return None
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    if not parsed.netloc or not parsed.hostname:
+        return None
+    if port is not None and not (1 <= port <= 65535):
+        return None
+    if parsed.username or parsed.password:
+        return None
+    return url
+
+
+def _redact_build_route_error(value: object) -> str:
+    text = str(value)
+    text = _URL_CREDENTIAL_RE.sub(r"\1***@", text)
+    text = _URL_QUERY_SECRET_RE.sub(r"\1***", text)
+    text = _NAMED_SECRET_RE.sub(r"\1***", text)
+    return _EMAIL_ADDRESS_RE.sub(r"***@\1", text)
+
+
+def _coerce_generated_file_content(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, dict):
+        for key in ("content", "code", "text", "output"):
+            candidate = value.get(key)
+            if candidate is None:
+                continue
+            try:
+                return _coerce_generated_file_content(candidate)
+            except TypeError:
+                continue
+    if isinstance(value, list):
+        parts: list[str] = []
+        for item in value:
+            try:
+                candidate = _coerce_generated_file_content(item)
+            except TypeError:
+                continue
+            if candidate:
+                parts.append(candidate)
+        if parts:
+            return "\n".join(parts)
+    raise TypeError("Model returned non-text generated file content")
+
+
+def _count_generated_file_lines(content: str) -> int:
+    return sum(1 for line in content.splitlines() if line.strip())
+
+
+def _coerce_build_string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        candidate = value.strip()
+        return [candidate] if candidate else []
+    if not isinstance(value, list):
+        return []
+    values: list[str] = []
+    for raw in value:
+        candidate = _coerce_build_text(raw)
+        if candidate:
+            values.append(candidate)
+    return values
+
+
+def _coerce_build_int(value: Any, fallback: int = 0) -> int:
+    normalized: float
+    if isinstance(value, bool):
+        return fallback
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        normalized = value
+    elif isinstance(value, str):
+        try:
+            normalized = float(value.strip())
+        except ValueError:
+            return fallback
+    else:
+        return fallback
+    return int(normalized) if math.isfinite(normalized) else fallback
+
+
+def _coerce_optional_build_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    return _coerce_build_int(value, 0)
+
+
+def _coerce_optional_build_float(value: Any) -> float | None:
+    normalized: float
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        normalized = float(value)
+    elif isinstance(value, str):
+        try:
+            normalized = float(value.strip())
+        except ValueError:
+            return None
+    else:
+        return None
+    return normalized if math.isfinite(normalized) else None
+
+
+def _coerce_optional_build_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    return None
+
+
+def _coerce_optional_build_dict(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        return value
+    return None
+
+
+def _coerce_build_row_list(value: Any) -> list[Any]:
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    return []
+
+
+def _coerce_existing_zip_path(value: Any) -> Path | None:
+    path_text = _coerce_build_text(value)
+    if not path_text or _has_ascii_control(path_text):
+        return None
+    path = Path(path_text)
+    if not path.is_absolute():
+        return None
+    if path.suffix.lower() != ".zip":
+        return None
+    try:
+        resolved_path = path.resolve(strict=False)
+        temp_root = Path(tempfile.gettempdir()).resolve(strict=False)
+    except OSError:
+        return None
+    if temp_root not in {resolved_path, *resolved_path.parents}:
+        return None
+    try:
+        relative_parts = resolved_path.relative_to(temp_root).parts
+    except ValueError:
+        return None
+    if not relative_parts or (
+        relative_parts[0] != "codey_builds"
+        and not relative_parts[0].startswith("codey_build_")
+    ):
+        return None
+    return resolved_path
+
+
+def _existing_zip_size(path: Path) -> int | None:
+    try:
+        if not path.is_file():
+            return None
+        return path.stat().st_size
+    except OSError:
+        return None
+
+
+def _template_to_response(template: Any) -> TemplateInfo:
+    payload = template if isinstance(template, dict) else {}
+    template_id = _coerce_build_text(payload.get("id")) or ""
+    return TemplateInfo(
+        id=template_id,
+        name=_coerce_build_text(payload.get("name")) or template_id or "Template",
+        description=_coerce_build_text(payload.get("description")) or "",
+        icon=_coerce_build_text(payload.get("icon")) or "",
+        estimated_credits=_coerce_build_int(payload.get("estimated_credits"), 0),
+        languages=_coerce_build_string_list(payload.get("languages")),
+        files_count=_coerce_build_int(payload.get("files_count"), 0),
+    )
+
+
 def _project_to_response(project: BuildProject) -> BuildProjectResponse:
+    status = _coerce_build_text(project.status) or "unknown"
+    files_completed = _coerce_build_int(project.files_completed, 0)
+    cached_download_url = _coerce_build_text(project.download_url)
+    has_download = status == "completed" and (
+        bool(cached_download_url) or files_completed > 0
+    )
     return BuildProjectResponse(
         id=str(project.id),
-        name=project.name,
-        description=project.description,
-        status=project.status,
-        current_phase=project.current_phase,
-        total_phases=project.total_phases,
-        files_planned=project.files_planned,
-        files_completed=project.files_completed,
-        lines_generated=project.lines_generated,
-        credits_charged=project.credits_charged,
-        nfet_es_score_final=project.nfet_es_score_final,
-        nfet_phase_final=project.nfet_phase_final,
-        project_plan=project.project_plan,
-        file_tree=project.file_tree,
-        stack=project.stack,
-        download_url=project.download_url,
-        github_repo_url=project.github_repo_url,
-        started_at=project.started_at.isoformat(),
-        completed_at=project.completed_at.isoformat() if project.completed_at else None,
+        name=_coerce_build_text(project.name),
+        description=_coerce_build_text(project.description),
+        status=status,
+        current_phase=_coerce_build_int(project.current_phase, 0),
+        total_phases=_coerce_optional_build_int(project.total_phases),
+        files_planned=_coerce_optional_build_int(project.files_planned),
+        files_completed=files_completed,
+        lines_generated=_coerce_build_int(project.lines_generated, 0),
+        credits_charged=_coerce_build_int(project.credits_charged, 0),
+        nfet_es_score_final=_coerce_optional_build_float(project.nfet_es_score_final),
+        nfet_phase_final=_coerce_build_text(project.nfet_phase_final),
+        project_plan=_coerce_optional_build_dict(project.project_plan),
+        file_tree=_coerce_optional_build_dict(project.file_tree),
+        stack=_coerce_optional_build_dict(project.stack),
+        download_url=(
+            _download_endpoint(str(project.id))
+            if has_download
+            else None
+        ),
+        github_repo_url=_coerce_build_public_url(project.github_repo_url),
+        started_at=_serialize_build_timestamp(project.started_at) or "",
+        completed_at=_serialize_build_timestamp(project.completed_at),
     )
 
 
 def _file_to_response(f: BuildFile) -> BuildFileResponse:
     return BuildFileResponse(
         id=str(f.id),
-        file_path=f.file_path,
-        line_count=f.line_count,
-        phase=f.phase,
-        status=f.status,
-        stress_score=f.stress_score,
-        validation_passed=f.validation_passed,
-        generated_at=f.generated_at.isoformat() if f.generated_at else None,
+        file_path=_coerce_build_text(f.file_path) or "",
+        line_count=_coerce_optional_build_int(f.line_count),
+        phase=_coerce_optional_build_int(f.phase),
+        status=_coerce_build_text(f.status) or "unknown",
+        stress_score=_coerce_optional_build_float(f.stress_score),
+        validation_passed=_coerce_optional_build_bool(f.validation_passed),
+        generated_at=_serialize_build_timestamp(f.generated_at),
     )
 
 
 def _file_to_detail(f: BuildFile) -> BuildFileDetailResponse:
     return BuildFileDetailResponse(
         id=str(f.id),
-        file_path=f.file_path,
-        content=f.content,
-        line_count=f.line_count,
-        phase=f.phase,
-        status=f.status,
-        stress_score=f.stress_score,
-        validation_passed=f.validation_passed,
-        generated_at=f.generated_at.isoformat() if f.generated_at else None,
+        file_path=_coerce_build_text(f.file_path) or "",
+        content=_coerce_build_content(f.content),
+        line_count=_coerce_optional_build_int(f.line_count),
+        phase=_coerce_optional_build_int(f.phase),
+        status=_coerce_build_text(f.status) or "unknown",
+        stress_score=_coerce_optional_build_float(f.stress_score),
+        validation_passed=_coerce_optional_build_bool(f.validation_passed),
+        generated_at=_serialize_build_timestamp(f.generated_at),
+    )
+
+
+def _checkpoint_to_response(
+    checkpoint: BuildCheckpoint,
+    project_id: object,
+) -> CheckpointResponse:
+    return CheckpointResponse(
+        id=str(checkpoint.id),
+        project_id=str(project_id),
+        phase=_coerce_optional_build_int(checkpoint.phase),
+        phase_name=_coerce_build_text(checkpoint.phase_name),
+        files_in_phase=_coerce_optional_build_int(checkpoint.files_in_phase),
+        tests_passed=_coerce_optional_build_int(checkpoint.tests_passed),
+        tests_failed=_coerce_optional_build_int(checkpoint.tests_failed),
+        nfet_es_score=_coerce_optional_build_float(checkpoint.nfet_es_score),
+        nfet_kappa=_coerce_optional_build_float(checkpoint.nfet_kappa),
+        nfet_sigma=_coerce_optional_build_float(checkpoint.nfet_sigma),
+        user_action=_coerce_build_text(checkpoint.user_action),
+        checkpoint_at=_serialize_build_timestamp(checkpoint.checkpoint_at) or "",
     )
 
 
@@ -454,7 +940,7 @@ async def build_plan(
 ) -> BuildPlanResponse:
     """Create a full build plan and persist the BuildProject row."""
 
-    answers = body.answers or {}
+    answers = _coerce_answer_mapping(body.answers)
     language = answers.get("language", "Python")
     framework = answers.get("framework", "auto")
     database = answers.get("database", "PostgreSQL")
@@ -493,6 +979,7 @@ async def build_plan(
     # Generate plan using LLM
     phases: list[dict[str, Any]] = []
     all_planned_files: list[str] = []
+    llm_phases: list[dict[str, Any]] = []
 
     try:
         provider, model = resolve_model("architecture")
@@ -506,30 +993,26 @@ async def build_plan(
             )},
             {"role": "user", "content": f"Project: {body.description}\nStack: {language}, {framework}, {database}"},
         ]
-        import json as _json
         raw = await call_model(provider, model, plan_prompt, max_tokens=2000, temperature=0.3)
-        # Extract JSON from response
-        json_match = raw
-        if "```" in raw:
-            import re
-            m = re.search(r"```(?:json)?\s*\n(.*?)```", raw, re.DOTALL)
-            if m:
-                json_match = m.group(1)
-        plan_data = _json.loads(json_match)
-        llm_phases = plan_data.get("phases", [])
-        if plan_data.get("estimated_credits"):
-            estimated_credits = plan_data["estimated_credits"]
+        plan_data = _extract_plan_mapping(raw)
+        llm_phases = _coerce_phase_entries(plan_data.get("phases"))
+        estimated_credits = _coerce_estimated_credits(
+            plan_data.get("estimated_credits"),
+            estimated_credits,
+        )
     except Exception:
-        # Fallback to static plan
-        llm_phases = [
-            {"name": "Project Setup & Configuration", "files": ["requirements.txt", "pyproject.toml", ".env.example", "Dockerfile"]},
-            {"name": "Core Data Models & Database", "files": ["app/models.py", "app/database.py", "migrations/init.sql"]},
-            {"name": "Business Logic & API", "files": ["app/main.py", "app/routes.py", "app/services.py", "app/auth.py"]},
-            {"name": "Tests & Documentation", "files": ["tests/test_routes.py", "tests/test_services.py", "README.md"]},
-        ][:total_phases]
+        llm_phases = []
+    if not llm_phases:
+        llm_phases = _default_build_plan_phases(total_phases)
+    seen_planned_files: set[str] = set()
     for i, phase_info in enumerate(llm_phases):
-        phase_name = phase_info.get("name", f"Phase {i+1}")
-        phase_files = phase_info.get("files", [])
+        phase_name = _coerce_phase_name(phase_info.get("name"), f"Phase {i+1}")
+        phase_files = []
+        for file_path in _coerce_phase_files(phase_info.get("files")):
+            if file_path in seen_planned_files:
+                continue
+            seen_planned_files.add(file_path)
+            phase_files.append(file_path)
         all_planned_files.extend(phase_files)
         phases.append({
             "phase": i + 1,
@@ -628,9 +1111,12 @@ async def build_approve(
         )
 
     # Estimate and reserve credits
+    files_planned = (
+        _coerce_build_int(getattr(project, "files_planned", None), 0) or 12
+    )
     estimated = max(
         CREDIT_COSTS["full_build"],
-        (project.files_planned or 12) * 2,
+        files_planned * 2,
     )
 
     credit_service = CreditService(db)
@@ -662,14 +1148,20 @@ async def build_approve(
                 BuildFile.project_id == project.id,
             ).order_by(BuildFile.phase)
         )
-        all_files = all_files_result.scalars().all()
+        all_files = _coerce_build_row_list(all_files_result.scalars().all())
 
         provider, model = resolve_model("code_generation")
         project_desc = project.description or ""
         generated_context: list[str] = []  # Track what's been built for context
+        had_generation_failures = False
 
         for bf in all_files:
             try:
+                file_path = normalize_plan_file_path(getattr(bf, "file_path", None))
+                if not file_path:
+                    raise ValueError("Invalid build file path")
+                bf.file_path = file_path
+
                 # Build context from previously generated files
                 context_summary = ""
                 if generated_context:
@@ -686,37 +1178,62 @@ async def build_approve(
                     )},
                     {"role": "user", "content": (
                         f"Project: {project_desc}\n"
-                        f"File to generate: {bf.file_path}\n"
+                        f"File to generate: {file_path}\n"
                         f"{context_summary}\n"
-                        f"Generate the complete, production-ready content for {bf.file_path}."
+                        f"Generate the complete, production-ready content for {file_path}."
                     )},
                 ]
-                content = await call_model(provider, model, gen_messages, max_tokens=4096)
+                content = _coerce_generated_file_content(
+                    await call_model(provider, model, gen_messages, max_tokens=4096)
+                )
                 bf.content = content
-                bf.line_count = content.count("\n") + 1
+                bf.line_count = _count_generated_file_lines(content)
                 bf.status = "completed"
                 bf.validation_passed = True
                 project.files_completed = (project.files_completed or 0) + 1
                 project.lines_generated = (project.lines_generated or 0) + bf.line_count
 
                 # Add to context for next files
-                generated_context.append(f"{bf.file_path} ({bf.line_count} lines)")
+                generated_context.append(f"{file_path} ({bf.line_count} lines)")
 
             except Exception as gen_err:
+                had_generation_failures = True
                 bf.status = "failed"
-                bf.content = f"# Generation failed: {str(gen_err)[:200]}"
+                bf.validation_passed = False
+                safe_error = _redact_build_route_error(gen_err)[:200]
+                bf.content = f"# Generation failed: {safe_error}"
 
-        project.status = "completed"
-        project.completed_at = datetime.utcnow()
+        project.status = "failed" if had_generation_failures else "completed"
+        if project.status == "completed":
+            project.completed_at = datetime.utcnow()
         await db.flush()
     except Exception:
-        pass  # Don't fail the approve if generation has issues
+        project.status = "failed"
+        try:
+            await credit_service.refund_credits(
+                user_id=current_user.id,
+                amount=estimated,
+                description=f"Refund failed build project: {(project.name or 'Untitled')[:60]}",
+                session_id=project.session_id,
+            )
+            project.credits_charged = 0
+        except Exception:
+            pass
+        await db.flush()
 
     return BuildApproveResponse(
         project_id=str(project.id),
         session_id=str(project.session_id or project.id),
-        status="building",
+        status=project.status,
     )
+
+
+@router.get("/templates", response_model=list[TemplateInfo])
+async def list_templates(
+    current_user: User = Depends(get_current_user),
+) -> list[TemplateInfo]:
+    """List available project templates."""
+    return [_template_to_response(tpl) for tpl in TEMPLATES]
 
 
 @router.get("/{project_id}", response_model=BuildProjectResponse)
@@ -745,7 +1262,7 @@ async def get_build_files(
         .order_by(BuildFile.phase, BuildFile.file_path)
     )
     result = await db.execute(stmt)
-    files = result.scalars().all()
+    files = _coerce_build_row_list(result.scalars().all())
 
     return [_file_to_response(f) for f in files]
 
@@ -811,7 +1328,7 @@ async def handle_checkpoint(
         BuildFile.phase == phase,
     )
     result = await db.execute(stmt)
-    phase_files = result.scalars().all()
+    phase_files = _coerce_build_row_list(result.scalars().all())
 
     tests_passed = sum(1 for f in phase_files if f.validation_passed is True)
     tests_failed = sum(1 for f in phase_files if f.validation_passed is False)
@@ -844,20 +1361,7 @@ async def handle_checkpoint(
 
     await db.flush()
 
-    return CheckpointResponse(
-        id=str(checkpoint.id),
-        project_id=str(project.id),
-        phase=checkpoint.phase,
-        phase_name=checkpoint.phase_name,
-        files_in_phase=checkpoint.files_in_phase,
-        tests_passed=checkpoint.tests_passed,
-        tests_failed=checkpoint.tests_failed,
-        nfet_es_score=checkpoint.nfet_es_score,
-        nfet_kappa=checkpoint.nfet_kappa,
-        nfet_sigma=checkpoint.nfet_sigma,
-        user_action=checkpoint.user_action,
-        checkpoint_at=checkpoint.checkpoint_at.isoformat(),
-    )
+    return _checkpoint_to_response(checkpoint, project.id)
 
 
 @router.get("/{project_id}/download", response_model=DownloadResponse)
@@ -875,53 +1379,126 @@ async def get_download(
             detail="Project must be completed before downloading",
         )
 
-    # If a pre-generated URL exists, return it
-    if project.download_url:
-        return DownloadResponse(
-            download_url=project.download_url,
-            filename=f"{project.name or 'project'}.zip",
-            size_bytes=0,
-        )
+    download_endpoint = _download_endpoint(project_id)
 
-    # Generate the zip on-the-fly
-    stmt = select(BuildFile).where(
-        BuildFile.project_id == project.id,
-        BuildFile.status == "completed",
-    )
-    result = await db.execute(stmt)
-    files = result.scalars().all()
+    # If a pre-generated artifact exists, return its public endpoint
+    existing_zip = _coerce_existing_zip_path(project.download_url)
+    if existing_zip is not None:
+        existing_zip_size = _existing_zip_size(existing_zip)
+        if existing_zip_size is not None:
+            return DownloadResponse(
+                download_url=download_endpoint,
+                filename=existing_zip.name,
+                size_bytes=existing_zip_size,
+            )
 
-    temp_dir = Path(tempfile.mkdtemp(prefix="codey_build_"))
-    zip_path = temp_dir / f"{project.name or 'project'}.zip"
-
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for f in files:
-            if f.content:
-                zf.writestr(f.file_path, f.content)
-
-    size = zip_path.stat().st_size
-    download_url = f"/build/{project_id}/download/zip"
-    project.download_url = str(zip_path)
-    await db.flush()
+    zip_path, size = await _generate_project_zip(project, db)
 
     return DownloadResponse(
-        download_url=download_url,
+        download_url=download_endpoint,
         filename=zip_path.name,
         size_bytes=size,
     )
 
 
-@router.get("/templates", response_model=list[TemplateInfo])
-async def list_templates(
+@router.get("/{project_id}/download/zip")
+async def download_project_zip(
+    project_id: str,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
-) -> list[TemplateInfo]:
-    """List available project templates."""
-    return [TemplateInfo(**tpl) for tpl in TEMPLATES]
+    db: AsyncSession = Depends(get_db),
+) -> FileResponse:
+    """Stream a generated project zip to the caller."""
+    project = await _get_project(project_id, current_user, db)
+
+    if project.status != "completed":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Project must be completed before downloading",
+        )
+
+    zip_path = _coerce_existing_zip_path(project.download_url)
+    generated_for_request = False
+    if zip_path is None or _existing_zip_size(zip_path) is None:
+        zip_path, _size = await _generate_project_zip(project, db)
+        generated_for_request = True
+
+    if generated_for_request:
+        background_tasks.add_task(_cleanup_generated_zip, zip_path)
+    return FileResponse(
+        path=zip_path,
+        filename=zip_path.name,
+        media_type="application/zip",
+    )
 
 
 # ---------------------------------------------------------------------------
 # WebSocket: real-time build progress stream
 # ---------------------------------------------------------------------------
+
+
+def _coerce_build_stream_message(value: object) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        return dict(value)
+    return None
+
+
+def _json_safe_build_stream_value(
+    value: Any,
+    _seen: set[int] | None = None,
+) -> Any:
+    if value is None or isinstance(value, (bool, int, str)):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else 0.0
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if _seen is None:
+        _seen = set()
+    if isinstance(value, dict):
+        value_id = id(value)
+        if value_id in _seen:
+            return "[Circular]"
+        _seen.add(value_id)
+        try:
+            return {
+                str(key): _json_safe_build_stream_value(item, _seen)
+                for key, item in value.items()
+            }
+        finally:
+            _seen.remove(value_id)
+    if isinstance(value, (set, frozenset)):
+        value_id = id(value)
+        if value_id in _seen:
+            return "[Circular]"
+        _seen.add(value_id)
+        try:
+            return [
+                _json_safe_build_stream_value(item, _seen)
+                for item in sorted(
+                    value,
+                    key=lambda item: (type(item).__name__, repr(item)),
+                )
+            ]
+        finally:
+            _seen.remove(value_id)
+    if isinstance(value, (list, tuple)):
+        value_id = id(value)
+        if value_id in _seen:
+            return "[Circular]"
+        _seen.add(value_id)
+        try:
+            return [_json_safe_build_stream_value(item, _seen) for item in value]
+        finally:
+            _seen.remove(value_id)
+    return str(value)
+
+
+async def _send_build_stream_json(
+    websocket: WebSocket,
+    event: dict[str, Any],
+) -> None:
+    await websocket.send_json(_json_safe_build_stream_value(event))
 
 
 @router.websocket("/{project_id}/stream")
@@ -940,36 +1517,35 @@ async def build_stream(
         "timestamp": "ISO8601"
     }
     """
-    # Authenticate via query-string token
-    if not token:
-        await websocket.close(code=1008, reason="Missing authentication token")
+    payload = authenticate_websocket(websocket, token)
+    if not payload:
+        await websocket.close(code=1008, reason="Authentication required")
         return
+    user_id = payload.get("sub")
 
     try:
-        payload = decode_access_token(token)
-        user_id = payload.get("sub")
-        if not user_id:
-            await websocket.close(code=1008, reason="Invalid token")
-            return
+        async for db in get_db():
+            await _get_project_for_user_id(project_id, user_id, db)
+            break
+    except HTTPException as exc:
+        reason = exc.detail if isinstance(exc.detail, str) else "Project access denied"
+        await websocket.close(code=1008, reason=reason[:120])
+        return
     except Exception:
-        await websocket.close(code=1008, reason="Invalid token")
+        await websocket.close(code=1011, reason="Failed to validate project access")
         return
 
     await websocket.accept()
 
-    try:
-        # Validate project ownership
-        async with get_db().__aiter__().__anext__() as db:  # type: ignore[attr-defined]
-            pass
-    except Exception:
-        pass
-
     # Send initial connection acknowledgment
-    await websocket.send_json({
-        "type": "status",
-        "data": {"message": "Connected to build stream", "project_id": project_id},
-        "timestamp": datetime.utcnow().isoformat(),
-    })
+    await _send_build_stream_json(
+        websocket,
+        {
+            "type": "status",
+            "data": {"message": "Connected to build stream", "project_id": project_id},
+            "timestamp": datetime.utcnow().isoformat(),
+        },
+    )
 
     try:
         # Keep connection alive and relay build events
@@ -978,22 +1554,29 @@ async def build_stream(
         while True:
             # Listen for client messages (heartbeats, cancellation requests)
             data = await websocket.receive_text()
-            import json
             try:
-                msg = json.loads(data)
+                msg = _coerce_build_stream_message(json.loads(data))
+                if msg is None:
+                    continue
                 if msg.get("type") == "ping":
-                    await websocket.send_json({
-                        "type": "pong",
-                        "data": {},
-                        "timestamp": datetime.utcnow().isoformat(),
-                    })
+                    await _send_build_stream_json(
+                        websocket,
+                        {
+                            "type": "pong",
+                            "data": {},
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
+                    )
                 elif msg.get("type") == "cancel":
-                    await websocket.send_json({
-                        "type": "status",
-                        "data": {"message": "Build cancellation requested"},
-                        "timestamp": datetime.utcnow().isoformat(),
-                    })
-            except (json.JSONDecodeError, KeyError):
+                    await _send_build_stream_json(
+                        websocket,
+                        {
+                            "type": "status",
+                            "data": {"message": "Build cancellation requested"},
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
+                    )
+            except json.JSONDecodeError:
                 pass
 
     except WebSocketDisconnect:

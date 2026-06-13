@@ -3,14 +3,80 @@
 from __future__ import annotations
 
 import logging
+import math
 from collections import deque
 from typing import Any
 
-import networkx as nx
+try:
+    import networkx as nx
+except ModuleNotFoundError as exc:  # pragma: no cover - exercised via import hook
+    if exc.name != "networkx" and not exc.name.startswith("networkx."):
+        raise
+    _NETWORKX_IMPORT_ERROR = exc
+    nx: Any = None
+else:
+    _NETWORKX_IMPORT_ERROR = None
 
 from codey.parser.extractor import CodeEdge, CodeNode
 
 logger = logging.getLogger(__name__)
+
+_MAX_DEPENDENCY_WEIGHT = 1_000_000.0
+_MAX_COMPLEXITY = 1_000_000.0
+
+
+def _coerce_dependency_weight(value: Any, default: float = 1.0) -> float:
+    """Return a finite non-negative edge weight for graph metrics."""
+    if isinstance(value, bool):
+        return default
+    try:
+        weight = float(value)
+    except OverflowError:
+        return _MAX_DEPENDENCY_WEIGHT
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(weight):
+        return _MAX_DEPENDENCY_WEIGHT if weight > 0 else default
+    if weight < 0.0:
+        return default
+    return min(weight, _MAX_DEPENDENCY_WEIGHT)
+
+
+def _coerce_nonnegative_metric(
+    value: Any, default: float = 0.0, maximum: float = _MAX_COMPLEXITY
+) -> float:
+    """Return a finite non-negative metric value for graph aggregations."""
+    if isinstance(value, bool):
+        return default
+    try:
+        metric = float(value)
+    except OverflowError:
+        return maximum
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(metric):
+        return maximum if metric > 0 else default
+    if metric < 0.0:
+        return default
+    return min(metric, maximum)
+
+
+def _iter_external_dependencies(value: Any) -> list[Any]:
+    """Return normalized external dependency entries without iterating strings."""
+    if value is None or isinstance(value, (str, bytes, bytearray)):
+        return []
+    if isinstance(value, dict):
+        return [value]
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return list(value)
+    return []
+
+
+def _require_networkx() -> None:
+    if _NETWORKX_IMPORT_ERROR is not None:
+        raise RuntimeError(
+            "networkx is required to construct CodebaseGraph"
+        ) from _NETWORKX_IMPORT_ERROR
 
 
 class CodebaseGraph:
@@ -21,6 +87,7 @@ class CodebaseGraph:
     """
 
     def __init__(self) -> None:
+        _require_networkx()
         self._graph: nx.DiGraph = nx.DiGraph()
         self._cache_version: int = 0
         self._cache: dict[str, tuple[int, Any]] = {}
@@ -162,7 +229,9 @@ class CodebaseGraph:
                 )
             else:
                 # External dependency — record on source node
-                ext_deps = self._graph.nodes[edge.source].get("_external_deps", [])
+                ext_deps = _iter_external_dependencies(
+                    self._graph.nodes[edge.source].get("_external_deps", [])
+                )
                 ext_deps.append({
                     "target": edge.target,
                     "kind": edge.kind,
@@ -198,16 +267,33 @@ class CodebaseGraph:
     @property
     def mean_cohesion(self) -> float:
         """Mean cohesion score across all file-level nodes."""
-        file_nodes = [
-            nid
-            for nid, data in self._graph.nodes(data=True)
-            if data.get("kind") == "file"
-        ]
+        file_nodes = self.file_nodes()
         if not file_nodes:
             return 0.0
         file_paths = [self._graph.nodes[nid].get("file_path", "") for nid in file_nodes]
         scores = [self.cohesion_score(fp) for fp in file_paths]
         return sum(scores) / len(scores)
+
+    def file_nodes(self) -> list[str]:
+        """Return all file-level node IDs."""
+        return [
+            nid
+            for nid, data in self._graph.nodes(data=True)
+            if data.get("kind") == "file"
+        ]
+
+    def find_file_node(self, file_path: str) -> str | None:
+        """Resolve a file path to its file-node ID."""
+        for nid in self.file_nodes():
+            if self._graph.nodes[nid].get("file_path") == file_path:
+                return nid
+        return None
+
+    def node_data(self, node_id: str) -> dict[str, Any]:
+        """Return a shallow copy of node attributes for safe external use."""
+        if node_id not in self._graph:
+            return {}
+        return dict(self._graph.nodes[node_id])
 
     # ------------------------------------------------------------------
     # Graph metric computations (cached)
@@ -269,8 +355,11 @@ class CodebaseGraph:
                 else:
                     external_graph += 1
             # Count external deps (imports to outside-graph modules)
-            ext_deps = self._graph.nodes[nid].get("_external_deps", [])
-            external_graph += len(ext_deps)
+            external_graph += len(
+                _iter_external_dependencies(
+                    self._graph.nodes[nid].get("_external_deps", [])
+                )
+            )
 
         total = internal + external_graph
         if total == 0:
@@ -307,14 +396,17 @@ class CodebaseGraph:
             # Count graph edges to nodes outside this module
             for _, target, edata in self._graph.out_edges(nid, data=True):
                 if target not in module_nodes:
-                    score += edata.get("weight", 1.0)
+                    score += _coerce_dependency_weight(edata.get("weight", 1.0))
             for source, _, edata in self._graph.in_edges(nid, data=True):
                 if source not in module_nodes:
-                    score += edata.get("weight", 1.0)
+                    score += _coerce_dependency_weight(edata.get("weight", 1.0))
             # Count external dependencies (imports to modules outside the graph)
-            ext_deps = self._graph.nodes[nid].get("_external_deps", [])
+            ext_deps = _iter_external_dependencies(
+                self._graph.nodes[nid].get("_external_deps", [])
+            )
             for dep in ext_deps:
-                score += dep.get("weight", 1.0)
+                weight = dep.get("weight", 1.0) if isinstance(dep, dict) else 1.0
+                score += _coerce_dependency_weight(weight)
 
         return self._set_cached(cache_key, score)
 
@@ -366,10 +458,13 @@ class CodebaseGraph:
         self, threshold: float = 0.7
     ) -> list[tuple[str, float]]:
         """Returns (node_id, stress) sorted descending for all components above threshold."""
+        safe_threshold = _coerce_nonnegative_metric(
+            threshold, default=0.7, maximum=_MAX_DEPENDENCY_WEIGHT
+        )
         results: list[tuple[str, float]] = []
         for nid in self._graph.nodes:
             stress = self.stress_score(nid)
-            if stress > threshold:
+            if stress > safe_threshold:
                 results.append((nid, stress))
         results.sort(key=lambda x: x[1], reverse=True)
         return results
@@ -382,6 +477,95 @@ class CodebaseGraph:
             if data.get("file_path") == file_path
         ]
 
+    def module_complexity(self, module_id: str) -> float:
+        """Average complexity for all nodes in a file/module."""
+        module_nodes = self.get_module_nodes(module_id)
+        if not module_nodes and module_id in self._graph:
+            file_path = self._graph.nodes[module_id].get("file_path", "")
+            module_nodes = self.get_module_nodes(file_path)
+
+        if not module_nodes:
+            return 0.0
+
+        complexities = [
+            _coerce_nonnegative_metric(
+                self._graph.nodes[nid].get("complexity", 0.0)
+            )
+            for nid in module_nodes
+        ]
+        return sum(complexities) / len(complexities) if complexities else 0.0
+
+    def module_dependency_stats(self, module_id: str) -> dict[str, int]:
+        """Return fan-in/fan-out and shared-state counts for a module."""
+        module_nodes = set(self.get_module_nodes(module_id))
+        if not module_nodes and module_id in self._graph:
+            file_path = self._graph.nodes[module_id].get("file_path", "")
+            module_nodes = set(self.get_module_nodes(file_path))
+
+        if not module_nodes:
+            return {
+                "fanin": 0,
+                "fanout": 0,
+                "shared_state_edges": 0,
+                "internal_edges": 0,
+                "external_deps": 0,
+            }
+
+        fanin = 0
+        fanout = 0
+        shared_state_edges = 0
+        internal_edges = 0
+        external_deps = 0
+
+        for nid in module_nodes:
+            for _, target, edata in self._graph.out_edges(nid, data=True):
+                if edata.get("kind") == "state_dep":
+                    shared_state_edges += 1
+                if target in module_nodes:
+                    internal_edges += 1
+                else:
+                    fanout += 1
+
+            for source, _, _edata in self._graph.in_edges(nid, data=True):
+                if source not in module_nodes:
+                    fanin += 1
+
+            external_deps += len(
+                _iter_external_dependencies(
+                    self._graph.nodes[nid].get("_external_deps", [])
+                )
+            )
+
+        return {
+            "fanin": fanin,
+            "fanout": fanout + external_deps,
+            "shared_state_edges": shared_state_edges,
+            "internal_edges": internal_edges,
+            "external_deps": external_deps,
+        }
+
+    def cycles_for_component(self, component_id: str) -> list[list[str]]:
+        """Return at most one detected cycle touching the component/module."""
+        if component_id not in self._graph:
+            return []
+
+        module_nodes = {component_id}
+        data = self._graph.nodes[component_id]
+        if data.get("kind") != "file":
+            file_path = data.get("file_path", "")
+            module_nodes = set(self.get_module_nodes(file_path))
+
+        for nid in module_nodes:
+            try:
+                cycle_edges = nx.find_cycle(self._graph, source=nid)
+            except nx.NetworkXNoCycle:
+                continue
+            if cycle_edges:
+                cycle_nodes = [edge[0] for edge in cycle_edges]
+                return [cycle_nodes]
+
+        return []
+
     def impact_radius(
         self, component_id: str, threshold: float = 0.1
     ) -> set[str]:
@@ -389,6 +573,9 @@ class CodebaseGraph:
         if component_id not in self._graph:
             return set()
 
+        safe_threshold = _coerce_nonnegative_metric(
+            threshold, default=0.1, maximum=_MAX_DEPENDENCY_WEIGHT
+        )
         visited: set[str] = set()
         queue: deque[str] = deque([component_id])
         visited.add(component_id)
@@ -396,7 +583,8 @@ class CodebaseGraph:
         while queue:
             current = queue.popleft()
             for _, target, edata in self._graph.out_edges(current, data=True):
-                if target not in visited and edata.get("weight", 1.0) > threshold:
+                weight = _coerce_dependency_weight(edata.get("weight", 1.0))
+                if target not in visited and weight > safe_threshold:
                     visited.add(target)
                     queue.append(target)
 

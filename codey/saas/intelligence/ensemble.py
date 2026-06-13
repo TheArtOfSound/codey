@@ -14,6 +14,69 @@ from codey.saas.intelligence.services import intelligence_services
 logger = logging.getLogger(__name__)
 
 MAX_AUTO_FIX_RETRIES = 3
+_URL_CREDENTIAL_RE = re.compile(
+    r"([A-Za-z][A-Za-z0-9+.-]*://)[^/@\s]+(?::[^/@\s]*)?@"
+)
+_URL_QUERY_SECRET_RE = re.compile(
+    r"(?i)([?&](?:api[_-]?key|access[_-]?token|auth[_-]?token|"
+    r"refresh[_-]?token|client[_-]?secret|token|secret|password)=)[^&\s]+"
+)
+_NAMED_SECRET_RE = re.compile(
+    r"(?i)(\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|"
+    r"refresh[_-]?token|client[_-]?secret|token|secret|password|authorization)"
+    r"\b\s*[:=]\s*(?:Bearer\s+)?[\"']?)[^\"'\s,}&]+"
+)
+_EMAIL_ADDRESS_RE = re.compile(
+    r"\b[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b"
+)
+
+
+def _redact_ensemble_error(value: object) -> str:
+    text = str(value)
+    text = _URL_CREDENTIAL_RE.sub(r"\1***@", text)
+    text = _URL_QUERY_SECRET_RE.sub(r"\1***", text)
+    text = _NAMED_SECRET_RE.sub(r"\1***", text)
+    return _EMAIL_ADDRESS_RE.sub(r"***@\1", text)
+
+
+def _content_to_text(value: object) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, dict):
+        for key in ("text", "content", "code", "output"):
+            candidate = value.get(key)
+            if candidate is None:
+                continue
+            normalized = _content_to_text(candidate)
+            if normalized:
+                return normalized
+        return ""
+    if not isinstance(value, list):
+        return ""
+    parts: list[str] = []
+    for item in value:
+        candidate = _content_to_text(item).strip()
+        if candidate:
+            parts.append(candidate)
+    return "\n".join(parts)
+
+
+def _coerce_bool_flag(value: object, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off", ""}:
+            return False
+        return default
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return default
+
 
 # ---------------------------------------------------------------------------
 # Assessment result
@@ -96,9 +159,10 @@ class ModelEnsemble:
         )
 
         # Assess the output if it looks like code
+        auto_fix_enabled = not _coerce_bool_flag(context.get("disable_auto_fix"))
         if self._looks_like_code(result.content):
             result.assessment = await self.assess_output(result.content, context)
-            if not result.assessment.passed:
+            if auto_fix_enabled and not result.assessment.passed:
                 fixed = await self.auto_fix(
                     result.content, result.assessment.issues, context
                 )
@@ -220,11 +284,12 @@ class ModelEnsemble:
         impl_result.latency_ms += reasoning_result.latency_ms
 
         # Assess
+        auto_fix_enabled = not _coerce_bool_flag(context.get("disable_auto_fix"))
         if self._looks_like_code(impl_result.content):
             impl_result.assessment = await self.assess_output(
                 impl_result.content, context
             )
-            if not impl_result.assessment.passed:
+            if auto_fix_enabled and not impl_result.assessment.passed:
                 fixed = await self.auto_fix(
                     impl_result.content, impl_result.assessment.issues, context
                 )
@@ -328,8 +393,11 @@ class ModelEnsemble:
                         line=finding.get("line"),
                     )
                 )
-        except Exception:
-            logger.debug("Semgrep integration skipped", exc_info=True)
+        except Exception as exc:
+            logger.debug(
+                "Semgrep integration skipped: %s",
+                _redact_ensemble_error(exc),
+            )
 
         # Compute score
         error_count = sum(1 for i in issues if i.severity == "error")
@@ -382,13 +450,15 @@ class ModelEnsemble:
                         ),
                     },
                 ]
-                fixed = await call_model(
+                fixed = _content_to_text(await call_model(
                     provider,
                     model,
                     fix_messages,
                     temperature=0.1,
                     max_tokens=min(len(code) * 2, 16_384),
-                )
+                ))
+                if not fixed.strip():
+                    raise TypeError("Model returned non-text auto-fix content")
 
                 # Extract code from markdown fences if present
                 blocks = self._extract_code_blocks(fixed)
@@ -408,8 +478,12 @@ class ModelEnsemble:
                 )
                 code = fixed
 
-            except Exception:
-                logger.exception("Auto-fix attempt %d failed", attempt)
+            except Exception as exc:
+                logger.warning(
+                    "Auto-fix attempt %d failed: %s",
+                    attempt,
+                    _redact_ensemble_error(exc),
+                )
 
         logger.warning("Auto-fix exhausted %d retries", MAX_AUTO_FIX_RETRIES)
         return code
@@ -442,9 +516,16 @@ class ModelEnsemble:
         try:
             from codey.saas.intelligence.embeddings import embedding_service
 
-            memories = await embedding_service.search_memories(
-                db, user_id=user_id, query=user_prompt, limit=5
-            )
+            begin_nested = getattr(db, "begin_nested", None)
+            if callable(begin_nested):
+                async with begin_nested():
+                    memories = await embedding_service.search_memories(
+                        db, user_id=user_id, query=user_prompt, limit=5
+                    )
+            else:
+                memories = await embedding_service.search_memories(
+                    db, user_id=user_id, query=user_prompt, limit=5
+                )
             if not memories:
                 return messages
 
@@ -469,8 +550,11 @@ class ModelEnsemble:
                 "Injected %d memories for user %s", len(memories), user_id
             )
             return injected
-        except Exception:
-            logger.debug("Memory retrieval failed, continuing without", exc_info=True)
+        except Exception as exc:
+            logger.debug(
+                "Memory retrieval failed, continuing without: %s",
+                _redact_ensemble_error(exc),
+            )
             return messages
 
     async def _call_and_measure(
@@ -482,18 +566,22 @@ class ModelEnsemble:
     ) -> ExecutionResult:
         """Call a model and return an :class:`ExecutionResult` with timing."""
         t0 = time.monotonic()
-        content = await call_model(
+        content = _content_to_text(await call_model(
             provider,
             model,
             messages,
             temperature=config.temperature,
             max_tokens=config.estimated_tokens,
-        )
+        ))
         latency_ms = (time.monotonic() - t0) * 1000
 
         # Rough token estimates (actual counts require response metadata)
-        tokens_in = sum(len(m.get("content", "").split()) * 1.3 for m in messages)
-        tokens_out = len(content.split()) * 1.3
+        tokens_in = sum(
+            len(_content_to_text(m.get("content")).split()) * 1.3
+            for m in messages
+            if isinstance(m, dict)
+        )
+        tokens_out = len(_content_to_text(content).split()) * 1.3
 
         return ExecutionResult(
             content=content,

@@ -39,3 +39,7 @@ class CreditTransaction(Base):
 
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="credit_transactions")
+
+
+if not TYPE_CHECKING:
+    from codey.saas.models import user as _user  # noqa: F401

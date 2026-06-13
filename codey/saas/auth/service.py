@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import logging
+import re
+from uuid import UUID
 
 import bcrypt
 import stripe
@@ -9,12 +12,71 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from codey.saas.auth.jwt import create_access_token, decode_access_token
-from codey.saas.auth.oauth import exchange_github_code, exchange_google_code
+from codey.saas.auth.oauth import (
+    _build_callback_url,
+    _coerce_oauth_avatar_url,
+    decode_oauth_state,
+    exchange_github_code,
+    exchange_google_code,
+)
 from codey.saas.config import settings
 from codey.saas.models import User
 
+logger = logging.getLogger("codey")
+_PASSWORD_RESET_PURPOSE = "password_reset"
+_BCRYPT_MAX_PASSWORD_BYTES = 72
+_URL_CREDENTIAL_RE = re.compile(
+    r"([A-Za-z][A-Za-z0-9+.-]*://)[^/@\s]+(?::[^/@\s]*)?@"
+)
+_URL_QUERY_SECRET_RE = re.compile(
+    r"(?i)([?&](?:api[_-]?key|access[_-]?token|auth[_-]?token|refresh[_-]?token|"
+    r"client[_-]?secret|token|secret|password)=)[^&\s]+"
+)
+_NAMED_SECRET_RE = re.compile(
+    r"(?i)(\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|refresh[_-]?token|"
+    r"client[_-]?secret|token|secret|password|authorization)"
+    r"\b\s*[:=]\s*(?:Bearer\s+)?[\"']?)[^\"'\s,}&]+"
+)
+_EMAIL_ADDRESS_RE = re.compile(
+    r"\b[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b"
+)
+
+
+def _redact_auth_error(value: object) -> str:
+    text = str(value)
+    text = _URL_CREDENTIAL_RE.sub(r"\1***@", text)
+    text = _URL_QUERY_SECRET_RE.sub(r"\1***", text)
+    text = _NAMED_SECRET_RE.sub(r"\1***", text)
+    return _EMAIL_ADDRESS_RE.sub(r"***@\1", text)
+
+
+def _coerce_non_empty_auth_text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _auth_text_update(current: object, incoming: object) -> str | None:
+    incoming_text = _coerce_non_empty_auth_text(incoming)
+    if incoming_text is None:
+        return None
+    return incoming_text if _coerce_non_empty_auth_text(current) is None else None
+
+
+def _coerce_auth_subject(value: object) -> str | None:
+    if isinstance(value, UUID):
+        return str(value)
+    if not isinstance(value, str):
+        return None
+    subject = value.strip()
+    if subject == "__invalid__":
+        return None
+    return subject or None
+
+
 # Configure the Stripe library once at import time
-stripe.api_key = settings.stripe_secret_key
+stripe.api_key = _coerce_non_empty_auth_text(settings.stripe_secret_key) or ""
 
 
 class AuthService:
@@ -29,16 +91,30 @@ class AuthService:
 
     @staticmethod
     def _hash_password(password: str) -> str:
+        if len(password.encode("utf-8")) > _BCRYPT_MAX_PASSWORD_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Password must be 72 bytes or fewer",
+            )
         salt = bcrypt.gensalt(rounds=12)
         return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
 
     @staticmethod
     def _verify_password(plain: str, hashed: str) -> bool:
-        return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+        try:
+            return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+        except ValueError:
+            return False
 
     @staticmethod
     def _make_token(user: User) -> str:
-        return create_access_token(str(user.id))
+        user_id = _coerce_auth_subject(getattr(user, "id", None))
+        if user_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Unable to create access token",
+            )
+        return create_access_token(user_id)
 
     async def _get_user_by_email(self, email: str) -> User | None:
         result = await self.db.execute(
@@ -56,8 +132,10 @@ class AuthService:
             )
             return customer["id"]
         except Exception as e:
-            import logging
-            logging.getLogger("codey").warning(f"Stripe customer creation skipped: {e}")
+            logger.warning(
+                "Stripe customer creation skipped: %s",
+                _redact_auth_error(e),
+            )
             return None
 
     # ------------------------------------------------------------------
@@ -69,6 +147,8 @@ class AuthService:
         email: str,
         password: str,
         name: str | None = None,
+        *,
+        frontend_origin: str | None = None,
     ) -> tuple[User, str]:
         """Register a new user with email and password.
 
@@ -102,17 +182,15 @@ class AuthService:
         # Send welcome email (best-effort)
         try:
             from codey.saas.emails.service import EmailService
-            from codey.saas.emails.templates import welcome
+
             email_svc = EmailService()
-            subject, html = welcome(
-                name=name or email,
-                dashboard_url="https://theartofsound.github.io/codey/dashboard.html",
-                credits=10,
+            await email_svc.send_welcome(
+                email,
+                name or email,
+                frontend_origin=frontend_origin,
             )
-            await email_svc.send_email(email, subject, html)
-        except Exception:
-            import logging
-            logging.getLogger("codey").debug("Welcome email skipped", exc_info=True)
+        except Exception as exc:
+            logger.debug("Welcome email skipped: %s", _redact_auth_error(exc))
 
         return user, token
 
@@ -128,9 +206,10 @@ class AuthService:
                 detail="Invalid email or password",
             )
 
-        if user.password_hash is None or not self._verify_password(
-            password, user.password_hash
-        ):
+        password_hash = _coerce_non_empty_auth_text(
+            getattr(user, "password_hash", None)
+        )
+        if password_hash is None or not self._verify_password(password, password_hash):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password",
@@ -146,13 +225,26 @@ class AuthService:
     # OAuth flows
     # ------------------------------------------------------------------
 
-    async def github_callback(self, code: str) -> tuple[User, str]:
+    async def github_callback(self, code: str, state: str) -> tuple[User, str]:
         """Handle the GitHub OAuth callback.
 
         Exchanges the authorization code, finds or creates the user, and
         returns the ``User`` with a JWT.
         """
-        gh_info = await exchange_github_code(code)
+        try:
+            state_data = decode_oauth_state(state, "github")
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=_redact_auth_error(exc),
+            ) from exc
+
+        gh_info = await exchange_github_code(
+            code,
+            redirect_uri=_build_callback_url("github", state_data.get("api_base_url")),
+        )
+        github_email = _coerce_non_empty_auth_text(gh_info.get("email"))
+        github_avatar_url = _coerce_oauth_avatar_url(gh_info.get("avatar_url"))
 
         # Look up by github_id first, then by email
         result = await self.db.execute(
@@ -160,17 +252,17 @@ class AuthService:
         )
         user = result.scalar_one_or_none()
 
-        if user is None and gh_info.get("email"):
-            user = await self._get_user_by_email(gh_info["email"])
+        if user is None and github_email:
+            user = await self._get_user_by_email(github_email)
 
         if user is None:
             # New user via GitHub
             user = User(
-                email=gh_info.get("email", f"gh-{gh_info['id']}@users.noreply.github.com"),
+                email=github_email or f"gh-{gh_info['id']}@users.noreply.github.com",
                 github_id=gh_info["id"],
                 github_token=gh_info["access_token"],
                 name=gh_info.get("name"),
-                avatar_url=gh_info.get("avatar_url"),
+                avatar_url=github_avatar_url,
                 plan="free",
                 credits_remaining=10,
             )
@@ -185,10 +277,16 @@ class AuthService:
             # Existing user — link/update GitHub info
             user.github_id = gh_info["id"]
             user.github_token = gh_info["access_token"]
-            if gh_info.get("name") and not user.name:
-                user.name = gh_info["name"]
-            if gh_info.get("avatar_url") and not user.avatar_url:
-                user.avatar_url = gh_info["avatar_url"]
+            if name := _auth_text_update(
+                getattr(user, "name", None),
+                gh_info.get("name"),
+            ):
+                user.name = name
+            if avatar_url := _auth_text_update(
+                getattr(user, "avatar_url", None),
+                github_avatar_url,
+            ):
+                user.avatar_url = avatar_url
 
         user.last_active = datetime.utcnow()
         await self.db.flush()
@@ -196,13 +294,25 @@ class AuthService:
         token = self._make_token(user)
         return user, token
 
-    async def google_callback(self, code: str) -> tuple[User, str]:
+    async def google_callback(self, code: str, state: str) -> tuple[User, str]:
         """Handle the Google OAuth callback.
 
         Exchanges the authorization code, finds or creates the user, and
         returns the ``User`` with a JWT.
         """
-        google_info = await exchange_google_code(code)
+        try:
+            state_data = decode_oauth_state(state, "google")
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=_redact_auth_error(exc),
+            ) from exc
+
+        google_info = await exchange_google_code(
+            code,
+            redirect_uri=_build_callback_url("google", state_data.get("api_base_url")),
+        )
+        google_avatar_url = _coerce_oauth_avatar_url(google_info.get("avatar_url"))
 
         # Look up by google_id first, then by email
         result = await self.db.execute(
@@ -219,7 +329,7 @@ class AuthService:
                 email=google_info["email"],
                 google_id=google_info["id"],
                 name=google_info.get("name"),
-                avatar_url=google_info.get("avatar_url"),
+                avatar_url=google_avatar_url,
                 plan="free",
                 credits_remaining=10,
             )
@@ -233,10 +343,16 @@ class AuthService:
         else:
             # Existing user — link/update Google info
             user.google_id = google_info["id"]
-            if google_info.get("name") and not user.name:
-                user.name = google_info["name"]
-            if google_info.get("avatar_url") and not user.avatar_url:
-                user.avatar_url = google_info["avatar_url"]
+            if name := _auth_text_update(
+                getattr(user, "name", None),
+                google_info.get("name"),
+            ):
+                user.name = name
+            if avatar_url := _auth_text_update(
+                getattr(user, "avatar_url", None),
+                google_avatar_url,
+            ):
+                user.avatar_url = avatar_url
 
         user.last_active = datetime.utcnow()
         await self.db.flush()
@@ -248,22 +364,42 @@ class AuthService:
     # Password reset
     # ------------------------------------------------------------------
 
-    async def request_password_reset(self, email: str) -> str:
-        """Generate a short-lived password-reset token.
-
-        Returns the token string. The caller is responsible for delivering it
-        to the user (e.g. via email).
-
-        If the email does not match any account, a token is still generated
-        to prevent user-enumeration attacks (the caller should always show a
-        generic success message).
-        """
+    async def request_password_reset(
+        self,
+        email: str,
+        *,
+        frontend_origin: str | None = None,
+    ) -> None:
+        """Generate and deliver a short-lived password-reset token."""
         user = await self._get_user_by_email(email)
         if user is None:
-            # Return a dummy token to prevent enumeration
-            return create_access_token("__invalid__", expires_delta=timedelta(hours=1))
+            return
 
-        return create_access_token(str(user.id), expires_delta=timedelta(hours=1))
+        user_id = _coerce_auth_subject(getattr(user, "id", None))
+        user_email = _coerce_non_empty_auth_text(getattr(user, "email", None))
+        if user_id is None or user_email is None:
+            return
+
+        token = create_access_token(
+            user_id,
+            expires_delta=timedelta(hours=1),
+            extra_claims={"purpose": _PASSWORD_RESET_PURPOSE},
+        )
+        try:
+            from codey.saas.emails.service import EmailService
+
+            email_svc = EmailService()
+            await email_svc.send_password_reset(
+                user_email,
+                token,
+                frontend_origin=frontend_origin,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Password reset email skipped for %s: %s",
+                _redact_auth_error(user_email),
+                _redact_auth_error(exc),
+            )
 
     async def reset_password(self, token: str, new_password: str) -> bool:
         """Validate a reset token and update the user's password.
@@ -271,9 +407,15 @@ class AuthService:
         Returns ``True`` on success, ``False`` if the token is invalid or the
         user no longer exists.
         """
-        payload = decode_access_token(token)
-        user_id = payload.get("sub")
-        if not user_id or user_id == "__invalid__":
+        try:
+            payload = decode_access_token(token)
+        except HTTPException:
+            return False
+        if payload.get("purpose") != _PASSWORD_RESET_PURPOSE:
+            return False
+
+        user_id = _coerce_auth_subject(payload.get("sub"))
+        if user_id is None:
             return False
 
         result = await self.db.execute(
