@@ -22,11 +22,12 @@ const plans: PlanCard[] = [
     id: "free",
     name: "Free",
     monthlyPrice: 0,
-    credits: 50,
+    credits: 10,
     features: [
-      "50 credits / month",
-      "Single repo analysis",
-      "Basic structural metrics",
+      "10 credits / month",
+      "1 repository under management",
+      "Manual scans and queue runs",
+      "Basic repo health signals",
       "Community support",
     ],
     cta: "Get started",
@@ -35,12 +36,12 @@ const plans: PlanCard[] = [
     id: "starter",
     name: "Starter",
     monthlyPrice: 19,
-    credits: 500,
+    credits: 100,
     features: [
-      "500 credits / month",
-      "5 connected repos",
-      "Full health dashboard",
-      "Collapse prediction",
+      "100 credits / month",
+      "1 connected repo",
+      "Continuous repo scans",
+      "Run history and risk queue",
       "Email support",
     ],
     cta: "Subscribe",
@@ -49,12 +50,12 @@ const plans: PlanCard[] = [
     id: "pro",
     name: "Pro",
     monthlyPrice: 49,
-    credits: 2000,
+    credits: 400,
     features: [
-      "2,000 credits / month",
-      "Unlimited repos",
-      "Autonomous mode",
-      "Cascade simulation",
+      "400 credits / month",
+      "5 connected repos",
+      "Autonomous maintenance runs",
+      "Priority-ranked intervention queue",
       "Priority support",
       "API access",
     ],
@@ -65,12 +66,12 @@ const plans: PlanCard[] = [
     id: "team",
     name: "Team",
     monthlyPrice: 149,
-    credits: 10000,
+    credits: 1500,
     features: [
-      "10,000 credits / month",
-      "Unlimited repos",
+      "1,500 credits / month",
+      "10 seats",
       "Everything in Pro",
-      "Team dashboard",
+      "Fleet-wide operator dashboard",
       "SSO & audit logs",
       "Dedicated support",
       "Custom integrations",
@@ -82,10 +83,10 @@ const plans: PlanCard[] = [
 // ── Credit Top-ups ───────────────────────────────────────────────────────────
 
 const topups = [
-  { credits: 100, price: 5 },
-  { credits: 500, price: 20 },
-  { credits: 2000, price: 60 },
-  { credits: 5000, price: 125 },
+  { credits: 50, price: 9 },
+  { credits: 200, price: 29 },
+  { credits: 600, price: 69 },
+  { credits: 2000, price: 199 },
 ];
 
 // ── FAQ ──────────────────────────────────────────────────────────────────────
@@ -93,7 +94,7 @@ const topups = [
 const faqItems = [
   {
     q: "What is a credit?",
-    a: "One credit roughly equals one AI-assisted action — a code generation, analysis step, or structural health computation. Simple completions cost 1 credit; complex autonomous tasks may cost 5-20 credits.",
+    a: "A credit is the execution budget for Codey to scan, analyze, prepare fixes, and document a repo operation. Small scans cost little; deeper autonomous runs use more.",
   },
   {
     q: "Can I switch plans anytime?",
@@ -105,7 +106,7 @@ const faqItems = [
   },
   {
     q: "What happens when I run out of credits?",
-    a: "You can purchase top-up credits instantly or upgrade your plan. Codey will pause generation and let you choose before any credits are spent.",
+    a: "You can purchase top-up credits instantly or upgrade your plan. Codey will pause new runs before it spends beyond your available execution budget.",
   },
   {
     q: "Is there an annual discount?",
@@ -163,10 +164,10 @@ export default function PricingPage() {
       {/* Header */}
       <section className="mx-auto max-w-5xl px-6 pb-12 pt-12 text-center md:pt-20">
         <h1 className="text-4xl font-bold md:text-5xl">
-          Simple, transparent pricing
+          Pricing for autonomous repo operations
         </h1>
         <p className="mx-auto mt-4 max-w-xl text-lg text-codey-text-dim">
-          Start free. Pay only when you need more power.
+          Size the plan around repos under management and how much maintenance you want Codey to run every month.
         </p>
 
         {/* Toggle */}

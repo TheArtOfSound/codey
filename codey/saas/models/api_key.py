@@ -1,6 +1,6 @@
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import ForeignKey, String, text
@@ -36,4 +36,21 @@ class ApiKey(Base):
     def is_expired(self) -> bool:
         if self.expires_at is None:
             return False
-        return datetime.utcnow() > self.expires_at
+        expires_at = self.expires_at
+        if isinstance(expires_at, str):
+            normalized = expires_at.strip()
+            if not normalized:
+                return True
+            try:
+                expires_at = datetime.fromisoformat(
+                    normalized.replace("Z", "+00:00")
+                )
+            except ValueError:
+                return True
+
+        if not isinstance(expires_at, datetime):
+            return True
+
+        if expires_at.tzinfo is not None:
+            return datetime.now(timezone.utc) > expires_at.astimezone(timezone.utc)
+        return datetime.utcnow() > expires_at

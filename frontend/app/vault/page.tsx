@@ -5,7 +5,6 @@ import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import Link from "next/link";
 import {
-  FolderCode,
   Clock,
   FileCode,
   GitBranch,
@@ -153,6 +152,7 @@ export default function VaultPage() {
   const { user } = useAuth();
   const [projects, setProjects] = useState<VaultProject[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [selectedProject, setSelectedProject] = useState<VaultProject | null>(null);
   const [selectedVersion, setSelectedVersion] = useState<number>(0);
@@ -163,90 +163,9 @@ export default function VaultPage() {
       try {
         const data = await api.get<VaultProject[]>("/vault/projects");
         setProjects(data);
-      } catch {
-        // Demo data
-        setProjects([
-          {
-            id: "1",
-            name: "codey-frontend",
-            language: "TypeScript",
-            last_active: new Date(Date.now() - 3600_000).toISOString(),
-            line_count: 12450,
-            health_score: 0.82,
-            session_count: 14,
-            versions: [
-              { id: "v3", version: 3, created_at: new Date(Date.now() - 3600_000).toISOString(), health_score: 0.82, prompt_summary: "Add settings page with billing", lines_changed: 340 },
-              { id: "v2", version: 2, created_at: new Date(Date.now() - 86400_000).toISOString(), health_score: 0.78, prompt_summary: "Implement dashboard and sessions", lines_changed: 890 },
-              { id: "v1", version: 1, created_at: new Date(Date.now() - 172800_000).toISOString(), health_score: 0.65, prompt_summary: "Initial scaffold with auth", lines_changed: 2100 },
-            ],
-            file_tree: [
-              { name: "app", type: "directory", children: [
-                { name: "page.tsx", type: "file", lines: 85 },
-                { name: "layout.tsx", type: "file", lines: 42 },
-                { name: "dashboard", type: "directory", children: [
-                  { name: "page.tsx", type: "file", lines: 310 },
-                  { name: "prompt", type: "directory", children: [{ name: "page.tsx", type: "file", lines: 280 }] },
-                ]},
-              ]},
-              { name: "lib", type: "directory", children: [
-                { name: "api.ts", type: "file", lines: 220 },
-                { name: "auth.ts", type: "file", lines: 165 },
-              ]},
-              { name: "components", type: "directory", children: [
-                { name: "layout", type: "directory", children: [
-                  { name: "Navbar.tsx", type: "file", lines: 180 },
-                  { name: "DashboardLayout.tsx", type: "file", lines: 95 },
-                ]},
-              ]},
-            ],
-          },
-          {
-            id: "2",
-            name: "api-service",
-            language: "Python",
-            last_active: new Date(Date.now() - 7200_000).toISOString(),
-            line_count: 8320,
-            health_score: 0.74,
-            session_count: 9,
-            versions: [
-              { id: "v2", version: 2, created_at: new Date(Date.now() - 7200_000).toISOString(), health_score: 0.74, prompt_summary: "Add analysis endpoints", lines_changed: 450 },
-              { id: "v1", version: 1, created_at: new Date(Date.now() - 259200_000).toISOString(), health_score: 0.61, prompt_summary: "FastAPI scaffold with auth routes", lines_changed: 1800 },
-            ],
-            file_tree: [
-              { name: "src", type: "directory", children: [
-                { name: "main.py", type: "file", lines: 120 },
-                { name: "routes", type: "directory", children: [
-                  { name: "auth.py", type: "file", lines: 180 },
-                  { name: "sessions.py", type: "file", lines: 220 },
-                ]},
-                { name: "models", type: "directory", children: [
-                  { name: "user.py", type: "file", lines: 65 },
-                  { name: "session.py", type: "file", lines: 85 },
-                ]},
-              ]},
-            ],
-          },
-          {
-            id: "3",
-            name: "structural-analyzer",
-            language: "Rust",
-            last_active: new Date(Date.now() - 432000_000).toISOString(),
-            line_count: 3200,
-            health_score: 0.91,
-            session_count: 4,
-            versions: [
-              { id: "v1", version: 1, created_at: new Date(Date.now() - 432000_000).toISOString(), health_score: 0.91, prompt_summary: "Core analysis engine", lines_changed: 3200 },
-            ],
-            file_tree: [
-              { name: "src", type: "directory", children: [
-                { name: "main.rs", type: "file", lines: 45 },
-                { name: "analyzer.rs", type: "file", lines: 680 },
-                { name: "parser.rs", type: "file", lines: 420 },
-              ]},
-              { name: "Cargo.toml", type: "file", lines: 28 },
-            ],
-          },
-        ]);
+      } catch (err) {
+        console.error("Failed to load vault:", err);
+        setError("Failed to load the Code Vault.");
       } finally {
         setLoading(false);
       }
@@ -278,13 +197,22 @@ export default function VaultPage() {
     );
   }
 
+  if (error) {
+    return (
+      <div className="mx-auto max-w-4xl rounded-xl border border-codey-red/30 bg-codey-card p-6">
+        <h1 className="text-2xl font-bold text-codey-text">Code Vault</h1>
+        <p className="mt-2 text-sm text-codey-red">{error}</p>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-6xl space-y-6">
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-bold text-codey-text">
-            <FolderCode className="h-6 w-6 text-codey-green" />
+            <Folder className="h-6 w-6 text-codey-green" />
             Code Vault
           </h1>
           <p className="mt-1 text-sm text-codey-text-dim">
@@ -380,9 +308,9 @@ export default function VaultPage() {
 
           {filteredProjects.length === 0 && (
             <div className="rounded-xl border border-codey-border bg-codey-card px-5 py-12 text-center">
-              <FolderCode className="mx-auto h-8 w-8 text-codey-text-muted" />
+              <Folder className="mx-auto h-8 w-8 text-codey-text-muted" />
               <p className="mt-2 text-sm text-codey-text-dim">
-                {search ? "No projects match your search." : "No projects in your vault yet. Start a prompt to create one."}
+                {search ? "No projects match your search." : "No projects in your vault yet. Queue a run to create one."}
               </p>
             </div>
           )}

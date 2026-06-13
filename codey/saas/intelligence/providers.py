@@ -17,6 +17,45 @@ else:  # pragma: no cover - depends on optional runtime dependency
 
 logger = logging.getLogger(__name__)
 
+import contextvars as _contextvars
+
+# Per-request BYOK override: holds {"provider","api_key","model"} or None.
+_byok_override: "_contextvars.ContextVar" = _contextvars.ContextVar("codey_byok_override", default=None)
+
+
+def set_byok_override(provider: object, api_key: object, model: object = None):
+    """Set (or clear) the per-context BYOK override; returns a reset token."""
+    prov = (str(provider).strip().lower() if provider else "")
+    key = (str(api_key).strip() if api_key else "")
+    if prov and key:
+        mdl = (str(model).strip() if model else "")
+        return _byok_override.set({"provider": prov, "api_key": key, "model": mdl or None})
+    return _byok_override.set(None)
+
+
+def clear_byok_override(token=None) -> None:
+    try:
+        if token is not None:
+            _byok_override.reset(token)
+        else:
+            _byok_override.set(None)
+    except Exception:
+        _byok_override.set(None)
+
+
+# Sensible default model per provider when a BYOK user does not specify one.
+_BYOK_DEFAULT_MODELS: dict[str, str] = {
+    "openai": "gpt-4o-mini",
+    "groq": "llama-3.3-70b-versatile",
+    "openrouter": "anthropic/claude-3.5-sonnet",
+    "deepseek": "deepseek-chat",
+    "together": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+    "fireworks": "accounts/fireworks/models/llama-v3p3-70b-instruct",
+    "cerebras": "llama-3.3-70b",
+    "mistral": "mistral-large-latest",
+    "gemini": "gemini-2.0-flash",
+}
+
 _URL_CREDENTIAL_RE = re.compile(
     r"([A-Za-z][A-Za-z0-9+.-]*://)[^/@\s]+(?::[^/@\s]*)?@"
 )
@@ -54,6 +93,10 @@ PROVIDERS: dict[str, dict[str, str]] = {
     "gemini": {
         "base": "https://generativelanguage.googleapis.com/v1beta/openai/",
         "key_env": "GEMINI_API_KEY",
+    },
+    "openai": {
+        "base": "https://api.openai.com/v1",
+        "key_env": "OPENAI_API_KEY",
     },
     "groq": {
         "base": "https://api.groq.com/openai/v1",
@@ -256,6 +299,18 @@ def get_client(provider: str) -> AsyncOpenAI:
     Raises ``ValueError`` if the provider is unknown and ``RuntimeError``
     if the required API key env var is not set.
     """
+    _ov = _byok_override.get()
+    if _ov and _ov.get("provider") == provider and _ov.get("api_key"):
+        _cfg = PROVIDERS.get(provider)
+        if _cfg is None:
+            raise ValueError(f"Unknown provider: {provider}")
+        _burl = _cfg["base"]
+        if "{account_id}" in _burl:
+            _burl = _burl.replace("{account_id}", _coerce_non_empty_provider_env("CLOUDFLARE_ACCOUNT_ID") or "")
+        _require_openai_sdk()
+        assert AsyncOpenAI is not None
+        return AsyncOpenAI(api_key=_ov["api_key"], base_url=_burl)
+
     if provider in _client_cache:
         return _client_cache[provider]
 
@@ -430,6 +485,16 @@ def resolve_model(task_key: str) -> tuple[str, str]:
     If the preferred provider is unavailable, tries the ``default`` entry.
     Raises ``RuntimeError`` when no providers are available at all.
     """
+    _ov = _byok_override.get()
+    if _ov and _ov.get("provider") and _ov.get("api_key"):
+        _p = _ov["provider"]
+        _base_spec = MODELS.get(task_key, MODELS["default"])
+        if _ov.get("model"):
+            return _p, _ov["model"]
+        if _base_spec.get("provider") == _p:
+            return _p, _base_spec["model"]
+        return _p, _BYOK_DEFAULT_MODELS.get(_p, _base_spec["model"])
+
     spec = MODELS.get(task_key, MODELS["default"])
     provider_name = spec["provider"]
 

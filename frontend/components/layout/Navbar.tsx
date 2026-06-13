@@ -38,7 +38,7 @@ export default function Navbar() {
   const navLinks = user
     ? [
         { href: "/dashboard", label: "Dashboard" },
-        { href: "/dashboard/prompt", label: "Prompt" },
+        { href: "/dashboard/prompt", label: "Queue Run" },
         { href: "/pricing", label: "Pricing" },
       ]
     : [];

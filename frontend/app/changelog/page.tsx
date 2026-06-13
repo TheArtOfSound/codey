@@ -15,22 +15,21 @@ const CHANGELOG: ChangelogEntry[] = [
     date: "March 27, 2026",
     title: "Codey is live",
     description:
-      "The first public release of Codey. Everything you need to go from a plain-English prompt to production-ready code.",
+      "The first public release of Codey as an autonomous repo operator for scan, repair, CI, security, docs, and release management.",
     type: "major",
     features: [
-      "AI code generation from natural language prompts with streaming output",
-      "Structural health analysis for every generated project",
-      "Code Vault with full version history, file tree browsing, and restore",
-      "Memory system that learns your coding preferences across 7 dimensions",
+      "Repo scan control room with maintenance lanes across bugs, CI, security, docs, and releases",
+      "Intervention console with mission templates that map 1:1 to Codey's repo-work coverage",
+      "Code Vault with version history, file tree browsing, and restore",
+      "Memory system that learns repo and operator preferences across sessions",
       "Credit-based usage with Free, Pro, and Team plans",
       "Stripe-powered billing with credit top-ups and subscription management",
-      "GitHub integration for repo linking and autonomous monitoring",
-      "Autonomous mode: Codey watches your repos and suggests fixes",
-      "Export center: download as ZIP, push to GitHub, or send via webhook",
-      "Session history with health tracking over time",
-      "Referral program: earn credits by inviting other developers",
-      "Full settings page with profile, notifications, API keys, and billing",
-      "Dark-themed responsive UI built for developers",
+      "GitHub integration for repo linking, scanning, and autonomous monitoring",
+      "Autopilot controls for recurring repo runs and approval boundaries",
+      "Run history with health tracking over time",
+      "Export center for patch and artifact delivery",
+      "Settings page with profile, notifications, API keys, and billing",
+      "Responsive operator interface built for repository fleets",
     ],
   },
 ];
@@ -101,8 +100,13 @@ export default function ChangelogPage() {
         <div className="mt-12 text-center">
           <p className="text-sm text-codey-text-muted">
             More updates coming soon. Follow{" "}
-            <a href="#" className="text-codey-green hover:underline">
-              @codeyai
+            <a
+              href="https://github.com/TheArtOfSound/codey"
+              target="_blank"
+              rel="noreferrer"
+              className="text-codey-green hover:underline"
+            >
+              the GitHub repo
             </a>{" "}
             for announcements.
           </p>

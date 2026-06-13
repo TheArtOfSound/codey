@@ -17,7 +17,7 @@ import { existsSync, readFileSync, writeFileSync, readdirSync, statSync } from "
 import { join, relative, extname } from "path";
 import { execSync } from "child_process";
 
-const API_BASE = process.env.CODEY_API || "https://api-codey.autohustle.online";
+const API_BASE = process.env.CODEY_API || "https://codey.imagineqira.com/api/proxy";
 const API_KEY = process.env.CODEY_KEY || "";
 const MAX_CONTEXT_CHARS = 100_000; // ~25K tokens
 
@@ -362,7 +362,7 @@ async function main() {
 
   if (!API_KEY) {
     console.log(c.red("Error: CODEY_KEY environment variable not set."));
-    console.log(c.dim("Get your API key at https://codey.autohustle.online/settings"));
+    console.log(c.dim("Get your API key at https://codey.imagineqira.com/settings"));
     console.log(c.dim("Then: export CODEY_KEY=your_key_here"));
     process.exit(1);
   }
@@ -391,7 +391,7 @@ ${c.bold("Usage:")}
 
 ${c.bold("Environment:")}
   CODEY_KEY                 Your API key (required)
-  CODEY_API                 API base URL (default: https://api-codey.autohustle.online)
+  CODEY_API                 API base URL (default: https://codey.imagineqira.com/api/proxy)
 
 ${c.bold("Config:")}
   Create a CODEY.md file in your project root with instructions

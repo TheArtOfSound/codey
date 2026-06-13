@@ -19,8 +19,8 @@ interface AuthState {
   loading: boolean;
   login: (email: string, password: string) => Promise<User>;
   signup: (email: string, password: string, name?: string) => Promise<User>;
-  loginWithGitHub: (code: string) => Promise<User>;
-  loginWithGoogle: (code: string) => Promise<User>;
+  loginWithGitHub: (code: string, state: string) => Promise<User>;
+  loginWithGoogle: (code: string, state: string) => Promise<User>;
   logout: () => void;
   refreshUser: () => Promise<void>;
 }
@@ -33,6 +33,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const pathname = usePathname();
 
   const refreshUser = useCallback(async () => {
     try {
@@ -45,25 +46,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Hydrate auth state from localStorage on mount
+  // Hydrate auth state from the session cookie only where auth matters.
   useEffect(() => {
-    const stored = api.getToken();
-    if (stored) {
-      setToken(stored);
-      api.getMe()
-        .then((me) => {
-          setUser(me);
-        })
-        .catch(() => {
-          api.setToken(null);
-          setToken(null);
-          setUser(null);
-        })
-        .finally(() => setLoading(false));
-    } else {
+    if (isAuthOptionalPath(pathname) && api.getToken() === null) {
       setLoading(false);
+      return;
     }
-  }, []);
+    refreshUser().finally(() => setLoading(false));
+  }, [pathname, refreshUser]);
 
   const login = useCallback(async (email: string, password: string) => {
     const result = await api.login(email, password);
@@ -79,15 +69,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return result.user;
   }, []);
 
-  const loginWithGitHub = useCallback(async (code: string) => {
-    const result = await api.loginWithGitHub(code);
+  const loginWithGitHub = useCallback(async (code: string, state: string) => {
+    const result = await api.loginWithGitHub(code, state);
     setToken(result.token);
     setUser(result.user);
     return result.user;
   }, []);
 
-  const loginWithGoogle = useCallback(async (code: string) => {
-    const result = await api.loginWithGoogle(code);
+  const loginWithGoogle = useCallback(async (code: string, state: string) => {
+    const result = await api.loginWithGoogle(code, state);
     setToken(result.token);
     setUser(result.user);
     return result.user;
@@ -130,7 +120,25 @@ export function useAuth(): AuthState {
 
 // ── Protected Route ────────────────────────────────────────────────────────
 
-const PUBLIC_PATHS = ["/auth/login", "/auth/signup", "/auth/callback", "/auth/forgot-password", "/auth/reset-password", "/pricing"];
+const AUTH_OPTIONAL_PATHS = [
+  "/",
+  "/auth/login",
+  "/auth/signup",
+  "/auth/callback",
+  "/auth/forgot-password",
+  "/auth/reset-password",
+  "/pricing",
+  "/privacy",
+  "/terms",
+  "/changelog",
+];
+
+function isAuthOptionalPath(pathname: string): boolean {
+  if (pathname === "/") {
+    return true;
+  }
+  return AUTH_OPTIONAL_PATHS.some((path) => path !== "/" && pathname.startsWith(path));
+}
 
 export function ProtectedRoute({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
@@ -138,7 +146,7 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
   const pathname = usePathname();
 
   useEffect(() => {
-    if (!loading && !user && !PUBLIC_PATHS.some((p) => pathname.startsWith(p))) {
+    if (!loading && !user && !isAuthOptionalPath(pathname)) {
       router.replace(`/auth/login?redirect=${encodeURIComponent(pathname)}`);
     }
   }, [user, loading, pathname, router]);
@@ -154,7 +162,7 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
     );
   }
 
-  if (!user && !PUBLIC_PATHS.some((p) => pathname.startsWith(p))) {
+  if (!user && !isAuthOptionalPath(pathname)) {
     return null;
   }
 

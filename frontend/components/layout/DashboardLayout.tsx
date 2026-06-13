@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import {
+  KeyRound,
   BarChart3,
   Code,
   Network,
@@ -28,12 +29,12 @@ interface NavItem {
 }
 
 const sidebarItems: NavItem[] = [
-  { href: "/dashboard", label: "Dashboard", icon: BarChart3 },
-  { href: "/dashboard/prompt", label: "New Prompt", icon: Code },
-  { href: "/dashboard/analyze", label: "Analyze", icon: Network },
-  { href: "/dashboard/repos", label: "Repos", icon: GitBranch },
-  { href: "/dashboard/autonomous", label: "Autonomous", icon: Bot },
-  { href: "/dashboard/credits", label: "Credits", icon: Zap },
+  { href: "/dashboard", label: "Control Room", icon: BarChart3 },
+  { href: "/dashboard/prompt", label: "Queue Run", icon: Code },
+  { href: "/dashboard/analyze", label: "Repo Scan", icon: Network },
+  { href: "/dashboard/repos", label: "Fleet", icon: GitBranch },
+  { href: "/dashboard/autonomous", label: "Autopilot", icon: Bot },
+  { href: "/dashboard/credits", label: "Usage", icon: Zap },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -82,6 +83,7 @@ export default function DashboardLayout({
                 <li key={item.href}>
                   <Link
                     href={item.href}
+                    prefetch={false}
                     className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
                       active
                         ? "bg-codey-green/10 font-medium text-codey-green"
@@ -102,6 +104,7 @@ export default function DashboardLayout({
           <div className="border-t border-codey-border px-4 py-4">
             <Link
               href="/dashboard/credits"
+              prefetch={false}
               className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-codey-text-dim transition-colors hover:bg-codey-card-hover hover:text-codey-text"
             >
               <Zap className="h-4 w-4 text-codey-green" />
@@ -147,6 +150,7 @@ export default function DashboardLayout({
                     <li key={item.href}>
                       <Link
                         href={item.href}
+                        prefetch={false}
                         onClick={() => setSidebarOpen(false)}
                         className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
                           active
@@ -220,6 +224,7 @@ export default function DashboardLayout({
             {user && (
               <Link
                 href="/dashboard/credits"
+                prefetch={false}
                 className="hidden items-center gap-1.5 rounded-full border border-codey-border bg-codey-card px-3 py-1 text-xs font-medium text-codey-text-dim transition-colors hover:border-codey-border-light hover:text-codey-text sm:flex"
               >
                 <Zap className="h-3 w-3 text-codey-green" />
@@ -255,6 +260,7 @@ export default function DashboardLayout({
                       <div className="py-1">
                         <Link
                           href="/dashboard"
+                          prefetch={false}
                           onClick={() => setUserMenuOpen(false)}
                           className="flex items-center gap-3 px-4 py-2 text-sm text-codey-text-dim hover:bg-codey-card-hover hover:text-codey-text"
                         >
@@ -263,6 +269,7 @@ export default function DashboardLayout({
                         </Link>
                         <Link
                           href="/settings"
+                          prefetch={false}
                           onClick={() => setUserMenuOpen(false)}
                           className="flex items-center gap-3 px-4 py-2 text-sm text-codey-text-dim hover:bg-codey-card-hover hover:text-codey-text"
                         >
@@ -270,7 +277,17 @@ export default function DashboardLayout({
                           Settings
                         </Link>
                         <Link
+                          href="/settings/llm"
+                          prefetch={false}
+                          onClick={() => setUserMenuOpen(false)}
+                          className="flex items-center gap-3 px-4 py-2 text-sm text-codey-text-dim hover:bg-codey-card-hover hover:text-codey-text"
+                        >
+                          <KeyRound className="h-4 w-4" />
+                          API Keys
+                        </Link>
+                        <Link
                           href="/settings/billing"
+                          prefetch={false}
                           onClick={() => setUserMenuOpen(false)}
                           className="flex items-center gap-3 px-4 py-2 text-sm text-codey-text-dim hover:bg-codey-card-hover hover:text-codey-text"
                         >

@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
-import { api, type PaymentMethod } from "@/lib/api";
+import { api, type ApiKeyRecord, type PaymentMethod } from "@/lib/api";
+import { storePendingOAuthRequest } from "@/lib/oauth";
 import { StripeProvider, SetupForm } from "@/lib/stripe";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { ProtectedRoute } from "@/lib/auth";
@@ -116,6 +117,11 @@ export default function SettingsPage() {
 
   // GitHub
   const [githubConnecting, setGithubConnecting] = useState(false);
+  const [githubToken, setGithubToken] = useState("");
+  const [githubTokenSaving, setGithubTokenSaving] = useState(false);
+  const [githubTokenError, setGithubTokenError] = useState<string | null>(null);
+  const [githubTokenSaved, setGithubTokenSaved] = useState(false);
+  const [authProviders, setAuthProviders] = useState({ github: false, google: false });
 
   // Notifications
   const [emailSessionComplete, setEmailSessionComplete] = useState(true);
@@ -124,12 +130,12 @@ export default function SettingsPage() {
   const [emailNewsletter, setEmailNewsletter] = useState(false);
 
   // API keys
-  const [apiKeys, setApiKeys] = useState<
-    Array<{ id: string; key: string; created_at: string; last_used_at: string | null }>
-  >([]);
+  const [apiKeys, setApiKeys] = useState<ApiKeyRecord[]>([]);
   const [newKeyName, setNewKeyName] = useState("");
   const [generatedKey, setGeneratedKey] = useState<string | null>(null);
   const [keyCopied, setKeyCopied] = useState(false);
+  const [apiKeySaving, setApiKeySaving] = useState(false);
+  const [apiKeyError, setApiKeyError] = useState<string | null>(null);
 
   // Billing
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
@@ -141,10 +147,11 @@ export default function SettingsPage() {
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [deleteInput, setDeleteInput] = useState("");
   const [deleting, setDeleting] = useState(false);
+  const isPro = user?.plan === "pro" || user?.plan === "team";
 
   useEffect(() => {
     if (user) {
-      setName(user.email.split("@")[0]);
+      setName(user.name || user.email.split("@")[0]);
     }
   }, [user]);
 
@@ -152,12 +159,29 @@ export default function SettingsPage() {
     api.getPaymentMethods().then(setPaymentMethods).catch(() => {});
   }, []);
 
+  useEffect(() => {
+    api.getAuthProviders()
+      .then(setAuthProviders)
+      .catch(() => setAuthProviders({ github: false, google: false }));
+  }, []);
+
+  useEffect(() => {
+    if (!user || !isPro) {
+      setApiKeys([]);
+      return;
+    }
+
+    api.getApiKeys()
+      .then(setApiKeys)
+      .catch(() => setApiKeyError("Failed to load API keys."));
+  }, [user, isPro]);
+
   // ── Handlers ────────────────────────────────────────────────────────────────
 
   async function handleSaveProfile() {
     setProfileSaving(true);
     try {
-      await api.updateProfile({});
+      await api.updateProfile({ name: name.trim() || undefined });
       setProfileSaved(true);
       setTimeout(() => setProfileSaved(false), 2000);
       await refreshUser();
@@ -177,8 +201,7 @@ export default function SettingsPage() {
     setPasswordSaving(true);
     setPasswordError(null);
     try {
-      // Call password change endpoint (not in current API, placeholder)
-      await new Promise((r) => setTimeout(r, 1000));
+      await api.changePassword(currentPassword, newPassword);
       setPasswordSaved(true);
       setCurrentPassword("");
       setNewPassword("");
@@ -190,34 +213,64 @@ export default function SettingsPage() {
     setPasswordSaving(false);
   }
 
-  function handleConnectGitHub() {
+  async function handleConnectGitHub() {
     setGithubConnecting(true);
-    const clientId = process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID || "";
-    const redirect = `${window.location.origin}/auth/github/callback`;
-    window.location.href = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirect)}&scope=repo`;
+    setGithubTokenError(null);
+    try {
+      const result = await api.getGitHubOAuthUrl("connect");
+      storePendingOAuthRequest({
+        provider: "github",
+        redirectTo: "/settings",
+        state: result.state,
+        intent: "connect",
+      });
+      window.location.href = result.url;
+      return;
+    } catch {
+      setGithubConnecting(false);
+    }
   }
 
-  function handleDisconnectGitHub() {
-    // Would call an API endpoint to disconnect
-    // For now just refresh user
-    refreshUser();
+  async function handleDisconnectGitHub() {
+    await api.disconnectGitHub();
+    await refreshUser();
+  }
+
+  async function handleSaveGitHubToken() {
+    if (!githubToken.trim()) {
+      setGithubTokenError("Paste a GitHub token first.");
+      return;
+    }
+
+    setGithubTokenSaving(true);
+    setGithubTokenError(null);
+    try {
+      await api.connectGitHubToken(githubToken.trim());
+      setGithubToken("");
+      setGithubTokenSaved(true);
+      setTimeout(() => setGithubTokenSaved(false), 2000);
+      await refreshUser();
+    } catch (err: unknown) {
+      const apiErr = err as { detail?: string };
+      setGithubTokenError(apiErr.detail || "Failed to save GitHub token.");
+    }
+    setGithubTokenSaving(false);
   }
 
   async function handleGenerateApiKey() {
     if (!newKeyName.trim()) return;
-    // Mock key generation
-    const mockKey = `codey_${Array.from({ length: 32 }, () => "abcdef0123456789"[Math.floor(Math.random() * 16)]).join("")}`;
-    setGeneratedKey(mockKey);
-    setApiKeys((prev) => [
-      ...prev,
-      {
-        id: Math.random().toString(36).slice(2),
-        key: `${mockKey.slice(0, 12)}...`,
-        created_at: new Date().toISOString(),
-        last_used_at: null,
-      },
-    ]);
-    setNewKeyName("");
+    setApiKeySaving(true);
+    setApiKeyError(null);
+    try {
+      const result = await api.createApiKey(newKeyName.trim());
+      setGeneratedKey(result.api_key);
+      setApiKeys((prev) => [result.key, ...prev]);
+      setNewKeyName("");
+      setKeyCopied(false);
+    } catch {
+      setApiKeyError("Failed to create API key.");
+    }
+    setApiKeySaving(false);
   }
 
   async function handleCopyKey() {
@@ -227,8 +280,13 @@ export default function SettingsPage() {
     setTimeout(() => setKeyCopied(false), 2000);
   }
 
-  function handleRevokeKey(id: string) {
-    setApiKeys((prev) => prev.filter((k) => k.id !== id));
+  async function handleRevokeKey(id: string) {
+    try {
+      await api.revokeApiKey(id);
+      setApiKeys((prev) => prev.filter((k) => k.id !== id));
+    } catch {
+      setApiKeyError("Failed to revoke API key.");
+    }
   }
 
   async function handleAddCard() {
@@ -253,14 +311,11 @@ export default function SettingsPage() {
     if (deleteInput !== "DELETE") return;
     setDeleting(true);
     try {
-      // Would call api.deleteAccount()
-      await new Promise((r) => setTimeout(r, 1000));
+      await api.delete("/users/me", { confirm: "DELETE" });
       window.location.href = "/";
     } catch {}
     setDeleting(false);
   }
-
-  const isPro = user?.plan === "pro" || user?.plan === "team";
 
   return (
     <ProtectedRoute>
@@ -419,10 +474,10 @@ export default function SettingsPage() {
           {/* ── GitHub Connection ───────────────────────────────────────── */}
           <Section
             title="GitHub Connection"
-            description="Connect your GitHub account to link repos and enable autonomous mode."
+            description="Connect GitHub with repository access so Codey can link private repos, open PRs, and run autonomous maintenance."
             icon={GitBranch}
           >
-            {user?.github_username ? (
+            {user?.github_connected ? (
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="flex h-10 w-10 items-center justify-center rounded-full bg-codey-card-hover">
@@ -430,9 +485,9 @@ export default function SettingsPage() {
                   </div>
                   <div>
                     <p className="text-sm font-medium text-codey-text">
-                      {user.github_username}
+                      GitHub account connected
                     </p>
-                    <p className="text-xs text-codey-green">Connected</p>
+                    <p className="text-xs text-codey-green">Reconnect if private repos are missing</p>
                   </div>
                 </div>
                 <button
@@ -443,15 +498,60 @@ export default function SettingsPage() {
                 </button>
               </div>
             ) : (
-              <button
-                onClick={handleConnectGitHub}
-                disabled={githubConnecting}
-                className="flex items-center gap-2 rounded-lg bg-codey-card-hover px-4 py-2.5 text-sm font-medium text-codey-text transition-colors hover:bg-codey-border"
-              >
-                <GitBranch className="h-4 w-4" />
-                {githubConnecting ? "Redirecting..." : "Connect GitHub"}
-                <ExternalLink className="h-3 w-3 text-codey-text-muted" />
-              </button>
+              <div className="space-y-4">
+                {authProviders.github ? (
+                  <button
+                    onClick={handleConnectGitHub}
+                    disabled={githubConnecting}
+                    className="flex items-center gap-2 rounded-lg bg-codey-card-hover px-4 py-2.5 text-sm font-medium text-codey-text transition-colors hover:bg-codey-border"
+                  >
+                    <GitBranch className="h-4 w-4" />
+                    {githubConnecting ? "Redirecting..." : "Connect GitHub Repo Access"}
+                    <ExternalLink className="h-3 w-3 text-codey-text-muted" />
+                  </button>
+                ) : (
+                  <div className="rounded-lg border border-codey-border bg-codey-bg px-4 py-3 text-sm text-codey-text-dim">
+                    GitHub OAuth is not configured for this deployment yet.
+                  </div>
+                )}
+
+                <div className="rounded-lg border border-codey-border bg-codey-bg px-4 py-4">
+                  <p className="text-xs text-codey-text-dim">
+                    Manual fallback: paste a GitHub personal access token with <code>repo</code>, <code>read:user</code>, and <code>user:email</code> so Codey can manage private repositories immediately.
+                  </p>
+                  <div className="mt-3 flex flex-col gap-3 sm:flex-row">
+                    <input
+                      type="password"
+                      value={githubToken}
+                      onChange={(e) => {
+                        setGithubToken(e.target.value);
+                        setGithubTokenSaved(false);
+                      }}
+                      placeholder="github_pat_..."
+                      className="flex-1 rounded-lg border border-codey-border bg-codey-card px-4 py-2.5 text-sm text-codey-text placeholder:text-codey-text-muted focus:border-codey-green focus:outline-none focus:ring-1 focus:ring-codey-green/30"
+                    />
+                    <button
+                      onClick={handleSaveGitHubToken}
+                      disabled={githubTokenSaving || !githubToken.trim()}
+                      className="rounded-lg bg-codey-green px-4 py-2.5 text-sm font-semibold text-codey-bg transition-all hover:shadow-glow-green disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {githubTokenSaving ? (
+                        <span className="flex items-center gap-2">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Saving...
+                        </span>
+                      ) : githubTokenSaved ? (
+                        "Saved"
+                      ) : (
+                        "Save Token"
+                      )}
+                    </button>
+                  </div>
+                  {githubTokenError && (
+                    <p className="mt-3 text-xs text-codey-red">{githubTokenError}</p>
+                  )}
+                </div>
+              </div>
             )}
           </Section>
 
@@ -521,13 +621,21 @@ export default function SettingsPage() {
                   />
                   <button
                     onClick={handleGenerateApiKey}
-                    disabled={!newKeyName.trim()}
+                    disabled={!newKeyName.trim() || apiKeySaving}
                     className="flex items-center gap-1.5 rounded-lg bg-codey-green px-4 py-2 text-sm font-semibold text-codey-bg hover:shadow-glow-green disabled:opacity-50"
                   >
-                    <Plus className="h-4 w-4" />
+                    {apiKeySaving ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Plus className="h-4 w-4" />
+                    )}
                     Generate
                   </button>
                 </div>
+
+                {apiKeyError && (
+                  <p className="text-xs text-codey-red">{apiKeyError}</p>
+                )}
 
                 {/* Show newly generated key */}
                 {generatedKey && (
@@ -562,14 +670,19 @@ export default function SettingsPage() {
                         className="flex items-center justify-between rounded-lg border border-codey-border bg-codey-bg px-4 py-3"
                       >
                         <div>
+                          <p className="text-sm text-codey-text">
+                            {key.name || "API key"}
+                          </p>
                           <code className="font-mono text-xs text-codey-text-dim">
-                            {key.key}
+                            {key.key_prefix || "cdy_..."}
                           </code>
                           <p className="mt-0.5 text-xs text-codey-text-muted">
                             Created{" "}
                             {new Date(key.created_at).toLocaleDateString()}
                             {key.last_used_at &&
                               ` · Last used ${new Date(key.last_used_at).toLocaleDateString()}`}
+                            {key.expires_at &&
+                              ` · Expires ${new Date(key.expires_at).toLocaleDateString()}`}
                           </p>
                         </div>
                         <button

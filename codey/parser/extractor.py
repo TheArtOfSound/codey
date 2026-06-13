@@ -4,22 +4,84 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
+import re
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Literal
+from pathlib import Path, PurePosixPath
+import tempfile
+from typing import Any, Literal
 
-import tree_sitter
-import tree_sitter_javascript
-import tree_sitter_python
-import tree_sitter_typescript
+try:
+    import tree_sitter
+    import tree_sitter_javascript
+    import tree_sitter_python
+    import tree_sitter_typescript
+except ModuleNotFoundError as exc:  # pragma: no cover - exercised via import hook
+    if exc.name not in {
+        "tree_sitter",
+        "tree_sitter_javascript",
+        "tree_sitter_python",
+        "tree_sitter_typescript",
+    }:
+        raise
+    _TREE_SITTER_IMPORT_ERROR = exc
+    tree_sitter: Any = None
+    tree_sitter_javascript: Any = None
+    tree_sitter_python: Any = None
+    tree_sitter_typescript: Any = None
+else:
+    _TREE_SITTER_IMPORT_ERROR = None
 
 logger = logging.getLogger(__name__)
 
 NodeKind = Literal["file", "function", "class", "method", "variable"]
 EdgeKind = Literal["import", "call", "inheritance", "state_dep", "data_flow"]
 
-SKIP_DIRS = {"node_modules", "__pycache__", ".git", ".venv", "dist", "build"}
+SKIP_DIRS = {
+    "node_modules",
+    "__pycache__",
+    ".git",
+    ".venv",
+    "venv",
+    ".next",
+    ".nuxt",
+    ".turbo",
+    ".pytest_cache",
+    "dist",
+    "build",
+}
 DEFAULT_EXTENSIONS = {".py", ".js", ".ts", ".jsx", ".tsx"}
+_LANGUAGE_EXTENSIONS = {
+    "python": ".py",
+    "javascript": ".js",
+    "typescript": ".ts",
+    "jsx": ".jsx",
+    "tsx": ".tsx",
+}
+_WINDOWS_DRIVE_PATH = re.compile(r"^[A-Za-z]:")
+_URL_CREDENTIAL_RE = re.compile(
+    r"([A-Za-z][A-Za-z0-9+.-]*://)[^/@\s]+(?::[^/@\s]*)?@"
+)
+_URL_QUERY_SECRET_RE = re.compile(
+    r"(?i)([?&](?:api[_-]?key|access[_-]?token|auth[_-]?token|"
+    r"refresh[_-]?token|client[_-]?secret|token|secret|password)=)[^&\s]+"
+)
+_NAMED_SECRET_RE = re.compile(
+    r"(?i)(\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|"
+    r"refresh[_-]?token|client[_-]?secret|token|secret|password|authorization)"
+    r"\b\s*[:=]\s*(?:Bearer\s+)?[\"']?)[^\"'\s,}&]+"
+)
+_EMAIL_ADDRESS_RE = re.compile(
+    r"\b[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b"
+)
+
+
+def _redact_parser_error(value: object) -> str:
+    text = str(value)
+    text = _URL_CREDENTIAL_RE.sub(r"\1***@", text)
+    text = _URL_QUERY_SECRET_RE.sub(r"\1***", text)
+    text = _NAMED_SECRET_RE.sub(r"\1***", text)
+    return _EMAIL_ADDRESS_RE.sub(r"***@\1", text)
 
 # tree-sitter node types that represent decision points for cyclomatic complexity
 _PYTHON_DECISION_TYPES = {
@@ -51,10 +113,58 @@ _JS_DECISION_TYPES = {
 }
 
 
+def _has_ascii_control(value: str) -> bool:
+    return any(ord(char) < 32 or ord(char) == 127 for char in value)
+
+
+def _source_extension(language: object) -> str:
+    if not isinstance(language, str):
+        return ".py"
+    return _LANGUAGE_EXTENSIONS.get(language.lower(), ".py")
+
+
+def _fallback_source_filename(language: object) -> str:
+    return f"snippet{_source_extension(language)}"
+
+
+def _normalize_source_filename(filename: object, language: object) -> str:
+    """Return a safe parser-facing filename for in-memory source snippets."""
+    fallback = _fallback_source_filename(language)
+    if not isinstance(filename, str):
+        return fallback
+
+    candidate = filename.replace("\\", "/")
+    if _has_ascii_control(candidate):
+        return fallback
+    candidate = candidate.strip()
+    if not candidate or _WINDOWS_DRIVE_PATH.match(candidate):
+        return fallback
+
+    path = PurePosixPath(candidate)
+    if path.is_absolute():
+        return fallback
+
+    parts = [part for part in path.parts if part not in {"", "."}]
+    if not parts or any(part == ".." for part in parts):
+        return fallback
+
+    normalized = PurePosixPath(*parts).as_posix()
+    if PurePosixPath(normalized).suffix:
+        return normalized
+    return f"{normalized}{_source_extension(language)}"
+
+
 def _node_id(file_path: str, name: str, line: int) -> str:
     """Deterministic ID for a code entity."""
     raw = f"{file_path}::{name}::{line}"
     return hashlib.sha1(raw.encode()).hexdigest()[:12]
+
+
+def _require_tree_sitter() -> None:
+    if _TREE_SITTER_IMPORT_ERROR is not None:
+        raise RuntimeError(
+            "tree-sitter packages are required for parsing source files"
+        ) from _TREE_SITTER_IMPORT_ERROR
 
 
 def _text(node: tree_sitter.Node) -> str:
@@ -98,6 +208,7 @@ class LanguageParser:
     """Parses source files using tree-sitter and extracts structural nodes & edges."""
 
     def __init__(self) -> None:
+        _require_tree_sitter()
         py_lang = tree_sitter.Language(tree_sitter_python.language())
         js_lang = tree_sitter.Language(tree_sitter_javascript.language())
         ts_lang = tree_sitter.Language(tree_sitter_typescript.language_typescript())
@@ -124,19 +235,31 @@ class LanguageParser:
         ext = file_path.suffix.lower()
         parser = self._parsers.get(ext)
         if parser is None:
-            logger.debug("No parser for extension %s (file: %s)", ext, file_path)
+            logger.debug(
+                "No parser for extension %s (file: %s)",
+                ext,
+                _redact_parser_error(file_path),
+            )
             return [], []
 
         try:
             source_bytes = file_path.read_bytes()
         except (OSError, PermissionError) as exc:
-            logger.warning("Could not read %s: %s", file_path, exc)
+            logger.warning(
+                "Could not read %s: %s",
+                _redact_parser_error(file_path),
+                _redact_parser_error(exc),
+            )
             return [], []
 
         try:
             tree = parser.parse(source_bytes)
         except Exception as exc:
-            logger.warning("tree-sitter parse failed for %s: %s", file_path, exc)
+            logger.warning(
+                "tree-sitter parse failed for %s: %s",
+                _redact_parser_error(file_path),
+                _redact_parser_error(exc),
+            )
             return [], []
 
         fp = str(file_path)
@@ -756,29 +879,40 @@ def parse_directory(
     exts = extensions or DEFAULT_EXTENSIONS
     all_nodes: list[CodeNode] = []
     all_edges: list[CodeEdge] = []
-    parser = LanguageParser()
 
     root = root.resolve()
     if not root.is_dir():
-        logger.error("parse_directory: %s is not a directory", root)
+        logger.error(
+            "parse_directory: %s is not a directory",
+            _redact_parser_error(root),
+        )
         return all_nodes, all_edges
 
-    for path in sorted(root.rglob("*")):
-        # Skip excluded directories
-        if any(part in SKIP_DIRS for part in path.parts):
-            continue
-        if not path.is_file():
-            continue
-        if path.suffix.lower() not in exts:
-            continue
+    parser = LanguageParser()
 
-        try:
-            file_nodes, file_edges = parser.parse_file(path)
-            all_nodes.extend(file_nodes)
-            all_edges.extend(file_edges)
-        except Exception as exc:
-            logger.warning("Failed to parse %s: %s", path, exc)
-            continue
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(
+            dirname for dirname in dirnames if dirname not in SKIP_DIRS
+        )
+        for filename in sorted(filenames):
+            path = Path(dirpath) / filename
+            if path.suffix.lower() not in exts:
+                continue
+
+            try:
+                file_nodes, file_edges = parser.parse_file(path)
+                relative_path = path.relative_to(root).as_posix()
+                for node in file_nodes:
+                    node.file_path = relative_path
+                all_nodes.extend(file_nodes)
+                all_edges.extend(file_edges)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to parse %s: %s",
+                    _redact_parser_error(path),
+                    _redact_parser_error(exc),
+                )
+                continue
 
     logger.info(
         "Parsed %d files -> %d nodes, %d edges from %s",
@@ -788,3 +922,31 @@ def parse_directory(
         root,
     )
     return all_nodes, all_edges
+
+
+def extract_from_source(
+    code: str,
+    filename: str = "main.py",
+    language: str = "python",
+) -> tuple[list[CodeNode], list[CodeEdge]]:
+    """Parse source code held in memory.
+
+    Existing API routes already depend on this helper, so keep the interface
+    stable and map it onto the file-based parser.
+    """
+    safe_filename = _normalize_source_filename(filename, language)
+    parser = LanguageParser()
+
+    with tempfile.TemporaryDirectory(prefix="codey_source_") as tmp_dir:
+        path = Path(tmp_dir) / PurePosixPath(safe_filename).name
+        path.write_text(code, encoding="utf-8")
+        nodes, edges = parser.parse_file(path)
+
+    for node in nodes:
+        node.file_path = safe_filename
+    return nodes, edges
+
+
+def extract_from_directory(root: str | Path) -> tuple[list[CodeNode], list[CodeEdge]]:
+    """Backwards-compatible wrapper around :func:`parse_directory`."""
+    return parse_directory(Path(root))

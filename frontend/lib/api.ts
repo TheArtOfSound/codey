@@ -1,4 +1,22 @@
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+import { getApiBaseUrl } from "./runtime-config";
+
+const BASE_URL = getApiBaseUrl();
+
+function getBrowserFrontendOrigin(): string | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  return window.location.origin;
+}
+
+function getBrowserApiBaseUrl(): string | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  return new URL(BASE_URL, window.location.origin).toString().replace(/\/$/, "");
+}
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -7,19 +25,27 @@ export interface User {
   email: string;
   name: string | null;
   avatar_url: string | null;
+  github_connected: boolean;
   plan: string;
+  plan_display_name?: string;
   plan_status: string;
   credits_remaining: number;
   topup_credits: number;
   total_credits: number;
+  credits_used_this_month?: number;
+  monthly_allocation?: number;
+  subscription_period_end?: string | null;
   created_at: string;
+  last_active?: string | null;
 }
 
 export interface CreditBalance {
-  credits_remaining: number;
-  plan_credits: number;
+  subscription_credits: number;
   topup_credits: number;
-  next_refresh_at: string | null;
+  total: number;
+  used_this_month: number;
+  plan: string;
+  monthly_allocation: number;
 }
 
 export interface CreditTransaction {
@@ -33,16 +59,69 @@ export interface CreditTransaction {
 
 export interface Session {
   id: string;
+  mode: string;
   repo_id: string | null;
   prompt: string;
   status: "queued" | "running" | "completed" | "failed" | "cancelled";
   credits_used: number;
   health_score_before: number | null;
   health_score_after: number | null;
+  lines_generated: number;
+  files_modified: number;
   plan: string | null;
   result_summary: string | null;
+  error_message: string | null;
   created_at: string;
   completed_at: string | null;
+}
+
+export interface PromptHealthReport {
+  phase: string;
+  health_score: number;
+  coherence: number;
+  stability: number;
+  total_nodes: number;
+  total_edges: number;
+  summary: string;
+  recommendations: string[];
+}
+
+export interface PromptSessionResult {
+  session_id: string;
+  estimated_credits: number;
+  output: string | null;
+  lines_generated: number;
+  status: string;
+  security_score: number | null;
+  security_issues: string[];
+  health: PromptHealthReport | null;
+}
+
+export interface AnalyzeComponent {
+  name: string;
+  file_path: string;
+  stress: number;
+  coupling: number;
+  cohesion: number;
+  cascade_depth: number;
+}
+
+export interface AnalyzeReport {
+  report: {
+    phase: string;
+    health_score: number;
+    coherence: number;
+    stability: number;
+    total_nodes: number;
+    total_edges: number;
+    mean_coupling: number;
+    mean_cohesion: number;
+    highest_stress_component: string;
+    highest_stress_value: number;
+    top_components: AnalyzeComponent[];
+    summary: string;
+  };
+  recommendations: string[];
 }
 
 export interface Repo {
@@ -53,15 +132,70 @@ export interface Repo {
   last_analyzed_at: string | null;
   health_score: number | null;
   connected_at: string;
+  autonomous_mode_enabled?: boolean;
+  autonomous_config?: Record<string, unknown> | null;
+}
+
+interface RepoApiResponse {
+  id: string;
+  full_name: string | null;
+  clone_url: string | null;
+  default_branch: string | null;
+  language: string | null;
+  autonomous_mode_enabled: boolean;
+  autonomous_config: Record<string, unknown> | null;
+  last_analyzed: string | null;
+  es_score: number | null;
+  created_at: string;
+}
+
+interface SessionApiResponse {
+  id: string;
+  mode: string;
+  prompt: string | null;
+  repo_connected: string | null;
+  status: Session["status"];
+  credits_charged: number;
+  lines_generated: number;
+  files_modified: number;
+  nfet_phase_before?: string | null;
+  nfet_phase_after: string | null;
+  es_score_before?: number | null;
+  es_score_after: number | null;
+  output_summary: string | null;
+  error_message?: string | null;
+  started_at: string;
+  completed_at: string | null;
 }
 
 export interface Plan {
   id: string;
+  key: string;
   name: string;
   price_monthly: number;
-  credits_per_month: number;
-  features: string[];
-  stripe_price_id: string;
+  credits: number;
+  rollover: number;
+  features: {
+    github_repos: number;
+    autonomous_mode: boolean;
+    priority: boolean;
+    max_upload_mb: number;
+    seats?: number | null;
+  };
+}
+
+export interface Invoice {
+  id: string;
+  number: string | null;
+  status: string | null;
+  amount_due: number;
+  amount_paid: number;
+  currency: string;
+  period_start: string;
+  period_end: string;
+  hosted_invoice_url: string | null;
+  pdf: string | null;
+  created: string;
 }
 
 export interface PaymentMethod {
@@ -70,7 +204,7 @@ export interface PaymentMethod {
   last4: string;
   exp_month: number;
   exp_year: number;
-  is_default: boolean;
+  is_default?: boolean;
 }
 
 export interface Subscription {
@@ -81,16 +215,44 @@ export interface Subscription {
   cancel_at_period_end: boolean;
 }
 
+export interface ApiKeyRecord {
+  id: string;
+  name: string | null;
+  key_prefix: string | null;
+  created_at: string;
+  last_used_at: string | null;
+  expires_at: string | null;
+  is_expired: boolean;
+}
+
 export interface TopupResult {
   client_secret: string;
-  amount: number;
-  credits: number;
 }
 
 export interface SubscriptionResult {
   client_secret: string | null;
+  subscription_id: string | null;
+  type: "setup_required" | "payment_required" | "active";
+}
+
+export interface ConfirmSubscriptionResult {
+  plan: string;
+  credits: number;
   subscription_id: string;
   status: string;
+}
+
+export interface ChangePlanResult {
+  old_plan: string;
+  new_plan: string;
+  credits: number;
+  subscription_id: string | null;
+}
+
+export interface CancelSubscriptionResult {
+  status: string;
+  access_until: string;
+  subscription_id: string | null;
 }
 
 export interface ApiError {
@@ -98,26 +260,18 @@ export interface ApiError {
   status: number;
 }
 
+export interface OAuthProviders {
+  github: boolean;
+  google: boolean;
+}
+
 // ── Client ─────────────────────────────────────────────────────────────────
 
 class ApiClient {
   private token: string | null = null;
 
-  constructor() {
-    if (typeof window !== "undefined") {
-      this.token = localStorage.getItem("codey_token");
-    }
-  }
-
   setToken(token: string | null) {
     this.token = token;
-    if (typeof window !== "undefined") {
-      if (token) {
-        localStorage.setItem("codey_token", token);
-      } else {
-        localStorage.removeItem("codey_token");
-      }
-    }
   }
 
   getToken(): string | null {
@@ -129,9 +283,19 @@ class ApiClient {
     options: RequestInit = {}
   ): Promise<T> {
     const headers: Record<string, string> = {
-      "Content-Type": "application/json",
       ...(options.headers as Record<string, string>),
     };
+    const frontendOrigin = getBrowserFrontendOrigin();
+    const apiBaseUrl = getBrowserApiBaseUrl();
+    if (!(options.body instanceof FormData) && !headers["Content-Type"]) {
+      headers["Content-Type"] = "application/json";
+    }
+    if (frontendOrigin) {
+      headers["X-Codey-Frontend-Origin"] = frontendOrigin;
+    }
+    if (apiBaseUrl) {
+      headers["X-Codey-Api-Base-Url"] = apiBaseUrl;
+    }
 
     if (this.token) {
       headers["Authorization"] = `Bearer ${this.token}`;
@@ -140,13 +304,11 @@ class ApiClient {
     const res = await fetch(`${BASE_URL}${path}`, {
       ...options,
       headers,
+      credentials: "include",
     });
 
     if (res.status === 401) {
       this.setToken(null);
-      if (typeof window !== "undefined") {
-        window.location.href = "/auth/login";
-      }
       throw { detail: "Unauthorized", status: 401 } as ApiError;
     }
 
@@ -163,6 +325,26 @@ class ApiClient {
     }
 
     return res.json();
+  }
+
+  private mapSession(data: SessionApiResponse): Session {
+    return {
+      id: data.id,
+      mode: data.mode,
+      repo_id: data.repo_connected,
+      prompt: data.prompt || "",
+      status: data.status,
+      credits_used: data.credits_charged,
+      health_score_before: data.es_score_before ?? null,
+      health_score_after: data.es_score_after,
+      lines_generated: data.lines_generated,
+      files_modified: data.files_modified,
+      plan: data.nfet_phase_after,
+      result_summary: data.output_summary,
+      error_message: data.error_message ?? null,
+      created_at: data.started_at,
+      completed_at: data.completed_at,
+    };
   }
 
   // ── Auth ──────────────────────────────────────────────────────────────
@@ -185,17 +367,30 @@ class ApiClient {
     return data;
   }
 
-  async loginWithGitHub(code: string): Promise<{ token: string; user: User }> {
+  async getGitHubOAuthUrl(intent: "login" | "connect" = "login"): Promise<{ url: string; state: string }> {
+    const query = intent === "login" ? "" : `?intent=${encodeURIComponent(intent)}`;
+    return this.request<{ url: string; state: string }>(`/auth/github${query}`);
+  }
+
+  async getGoogleOAuthUrl(): Promise<{ url: string; state: string }> {
+    return this.request<{ url: string; state: string }>("/auth/google");
+  }
+
+  async getAuthProviders(): Promise<OAuthProviders> {
+    return this.request<OAuthProviders>("/auth/providers");
+  }
+
+  async loginWithGitHub(code: string, state: string): Promise<{ token: string; user: User }> {
     const data = await this.request<{ token: string; user: User }>(
-      `/auth/github/callback?code=${encodeURIComponent(code)}`
+      `/auth/github/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`
     );
     this.setToken(data.token);
     return data;
   }
 
-  async loginWithGoogle(code: string): Promise<{ token: string; user: User }> {
+  async loginWithGoogle(code: string, state: string): Promise<{ token: string; user: User }> {
     const data = await this.request<{ token: string; user: User }>(
-      `/auth/google/callback?code=${encodeURIComponent(code)}`
+      `/auth/google/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`
     );
     this.setToken(data.token);
     return data;
@@ -216,6 +411,10 @@ class ApiClient {
   }
 
   logout() {
+    void fetch(`${BASE_URL}/auth/logout`, {
+      method: "POST",
+      credentials: "include",
+    }).catch(() => undefined);
     this.setToken(null);
     if (typeof window !== "undefined") {
       window.location.href = "/auth/login";
@@ -228,6 +427,31 @@ class ApiClient {
     return this.request<User>("/users/me");
   }
 
+  async getByok(): Promise<{
+    configured: boolean;
+    provider: string | null;
+    model: string | null;
+    has_key: boolean;
+    allowed_providers: string[];
+  }> {
+    return this.request("/users/me/byok");
+  }
+
+  async setByok(
+    provider: string,
+    apiKey: string,
+    model?: string,
+  ): Promise<{ configured: boolean; provider: string | null; model: string | null; has_key: boolean }> {
+    return this.request("/users/me/byok", {
+      method: "PUT",
+      body: JSON.stringify({ provider, api_key: apiKey, model: model || null }),
+    });
+  }
+
+  async clearByok(): Promise<void> {
+    return this.request<void>("/users/me/byok", { method: "DELETE" });
+  }
+
   async updateProfile(data: { email?: string; name?: string }): Promise<User> {
     return this.request<User>("/users/me", {
       method: "PATCH",
@@ -235,10 +459,33 @@ class ApiClient {
     });
   }
 
+  async changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    return this.request<void>("/users/me/password", {
+      method: "POST",
+      body: JSON.stringify({
+        current_password: currentPassword,
+        new_password: newPassword,
+      }),
+    });
+  }
+
+  async disconnectGitHub(): Promise<void> {
+    return this.request<void>("/users/me/github", {
+      method: "DELETE",
+    });
+  }
+
+  async connectGitHubToken(token: string): Promise<User> {
+    return this.request<User>("/users/me/github/token", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    });
+  }
+
   // ── Credits ───────────────────────────────────────────────────────────
 
   async getCredits(): Promise<CreditBalance> {
-    return this.request<CreditBalance>("/credits");
+    return this.request<CreditBalance>("/credits/balance");
   }
 
   async getCreditHistory(params?: {
@@ -251,23 +498,31 @@ class ApiClient {
     if (params?.offset) searchParams.set("offset", String(params.offset));
     if (params?.type) searchParams.set("type", params.type);
     const query = searchParams.toString();
-    return this.request(`/credits/history${query ? `?${query}` : ""}`);
+    const data = await this.request<{ transactions: CreditTransaction[] }>(
+      `/credits/history${query ? `?${query}` : ""}`
+    );
+    return {
+      transactions: data.transactions,
+      total: data.transactions.length,
+    };
   }
 
   // ── Sessions ──────────────────────────────────────────────────────────
 
-  async createSession(data: {
+  async generateCode(data: {
     repo_id?: string;
     prompt: string;
-  }): Promise<Session> {
-    return this.request<Session>("/sessions", {
+    language?: string;
+  }): Promise<PromptSessionResult> {
+    return this.request<PromptSessionResult>("/sessions/prompt", {
       method: "POST",
       body: JSON.stringify(data),
     });
   }
 
   async getSession(id: string): Promise<Session> {
-    return this.request<Session>(`/sessions/${id}`);
+    const data = await this.request<SessionApiResponse>(`/sessions/${id}`);
+    return this.mapSession(data);
   }
 
   async getSessions(params?: {
@@ -280,98 +535,189 @@ class ApiClient {
     if (params?.offset) searchParams.set("offset", String(params.offset));
     if (params?.status) searchParams.set("status", params.status);
     const query = searchParams.toString();
-    return this.request(`/sessions${query ? `?${query}` : ""}`);
+    const data = await this.request<{
+      sessions: SessionApiResponse[];
+      total: number;
+      limit: number;
+      offset: number;
+    }>(`/users/me/sessions${query ? `?${query}` : ""}`);
+    return {
+      sessions: data.sessions.map((session) => this.mapSession(session)),
+      total: data.total,
+    };
   }
 
   async cancelSession(id: string): Promise<void> {
     return this.request<void>(`/sessions/${id}/cancel`, { method: "POST" });
   }
 
+  async commitSession(id: string): Promise<{ session_id: string; credits_charged: number; message: string }> {
+    return this.request<{ session_id: string; credits_charged: number; message: string }>(
+      `/sessions/${id}/commit`,
+      { method: "POST" }
+    );
+  }
+
+  async analyzeUpload(files: File[]): Promise<AnalyzeReport> {
+    const formData = new FormData();
+    files.forEach((file) => formData.append("files", file));
+    return this.request<AnalyzeReport>("/analyze/upload", {
+      method: "POST",
+      body: formData,
+    });
+  }
+
   // ── Repos ─────────────────────────────────────────────────────────────
 
   async getRepos(): Promise<Repo[]> {
-    return this.request<Repo[]>("/repos");
+    const repos = await this.request<RepoApiResponse[]>("/repos");
+    return repos.map((repo) => ({
+      id: repo.id,
+      github_url: repo.clone_url || repo.full_name || "",
+      name: repo.full_name?.split("/").pop() || repo.full_name || "Repository",
+      default_branch: repo.default_branch || "main",
+      last_analyzed_at: repo.last_analyzed,
+      health_score: repo.es_score,
+      connected_at: repo.created_at,
+      autonomous_mode_enabled: repo.autonomous_mode_enabled,
+      autonomous_config: repo.autonomous_config,
+    }));
   }
 
   async connectRepo(data: {
     github_url: string;
     branch?: string;
   }): Promise<Repo> {
-    return this.request<Repo>("/repos", {
+    const repo = await this.request<RepoApiResponse>("/repos", {
       method: "POST",
-      body: JSON.stringify(data),
+      body: JSON.stringify({
+        github_repo_url: data.github_url,
+      }),
     });
+    return {
+      id: repo.id,
+      github_url: repo.clone_url || repo.full_name || "",
+      name: repo.full_name?.split("/").pop() || repo.full_name || "Repository",
+      default_branch: repo.default_branch || "main",
+      last_analyzed_at: repo.last_analyzed,
+      health_score: repo.es_score,
+      connected_at: repo.created_at,
+      autonomous_mode_enabled: repo.autonomous_mode_enabled,
+      autonomous_config: repo.autonomous_config,
+    };
   }
 
   async disconnectRepo(id: string): Promise<void> {
     return this.request<void>(`/repos/${id}`, { method: "DELETE" });
   }
 
-  async analyzeRepo(id: string): Promise<{ health_score: number }> {
-    return this.request(`/repos/${id}/analyze`, { method: "POST" });
-  }
-
   // ── Plans & Subscriptions ────────────────────────────────────────────
 
   async getPlans(): Promise<Plan[]> {
-    return this.request<Plan[]>("/plans");
+    const data = await this.request<{
+      plans: Array<{
+        key: string;
+        name: string;
+        price_monthly: number;
+        credits: number;
+        rollover: number;
+        features: Plan["features"];
+      }>;
+    }>("/billing/plans");
+    return data.plans.map((plan) => ({
+      ...plan,
+      id: plan.key,
+    }));
   }
 
-  async getSubscription(): Promise<Subscription | null> {
-    return this.request<Subscription | null>("/subscription");
-  }
-
-  async subscribe(priceId: string): Promise<SubscriptionResult> {
-    return this.request<SubscriptionResult>("/subscription", {
+  async subscribe(plan: string): Promise<SubscriptionResult> {
+    return this.request<SubscriptionResult>("/billing/subscribe", {
       method: "POST",
-      body: JSON.stringify({ price_id: priceId }),
+      body: JSON.stringify({ plan }),
     });
   }
 
-  async confirmSubscription(subscriptionId: string): Promise<Subscription> {
-    return this.request<Subscription>("/subscription/confirm", {
+  async confirmSubscription(
+    subscriptionId: string
+  ): Promise<ConfirmSubscriptionResult> {
+    return this.request<ConfirmSubscriptionResult>("/billing/subscribe/confirm", {
       method: "POST",
       body: JSON.stringify({ subscription_id: subscriptionId }),
     });
   }
 
-  async cancelSubscription(): Promise<void> {
-    return this.request<void>("/subscription", { method: "DELETE" });
+  async changePlan(plan: string): Promise<ChangePlanResult> {
+    return this.request<ChangePlanResult>("/billing/change-plan", {
+      method: "POST",
+      body: JSON.stringify({ plan }),
+    });
   }
 
-  async reactivateSubscription(): Promise<Subscription> {
-    return this.request<Subscription>("/subscription/reactivate", {
+  async cancelSubscription(): Promise<CancelSubscriptionResult> {
+    return this.request<CancelSubscriptionResult>("/billing/cancel", {
       method: "POST",
     });
   }
 
   // ── Payments ──────────────────────────────────────────────────────────
 
-  async createTopup(credits: number): Promise<TopupResult> {
-    return this.request<TopupResult>("/payments/topup", {
+  async createTopup(packageKey: string): Promise<TopupResult> {
+    return this.request<TopupResult>("/billing/topup", {
       method: "POST",
-      body: JSON.stringify({ credits }),
+      body: JSON.stringify({ package: packageKey }),
     });
   }
 
   async getPaymentMethods(): Promise<PaymentMethod[]> {
-    return this.request<PaymentMethod[]>("/payments/methods");
-  }
-
-  async setDefaultPaymentMethod(methodId: string): Promise<void> {
-    return this.request<void>(`/payments/methods/${methodId}/default`, {
-      method: "POST",
-    });
+    return this.request<PaymentMethod[]>("/billing/payment-methods");
   }
 
   async deletePaymentMethod(methodId: string): Promise<void> {
-    return this.request<void>(`/payments/methods/${methodId}`, {
+    return this.request<void>(`/billing/payment-methods/${methodId}`, {
       method: "DELETE",
     });
   }
 
   async getSetupIntent(): Promise<{ client_secret: string }> {
-    return this.request("/payments/setup-intent", { method: "POST" });
+    return this.request("/billing/payment-methods", { method: "POST" });
+  }
+
+  async getInvoices(): Promise<Invoice[]> {
+    return this.request<Invoice[]>("/billing/invoices");
+  }
+
+  async claimReferral(
+    referrerId: string
+  ): Promise<{ status: string; referral_id: string }> {
+    return this.request<{ status: string; referral_id: string }>("/referrals/claim", {
+      method: "POST",
+      body: JSON.stringify({ referrer_id: referrerId }),
+    });
+  }
+
+  // ── API keys ─────────────────────────────────────────────────────────
+
+  async getApiKeys(): Promise<ApiKeyRecord[]> {
+    return this.request<ApiKeyRecord[]>("/users/me/api-keys");
+  }
+
+  async createApiKey(
+    name: string,
+    expiresInDays?: number
+  ): Promise<{ api_key: string; key: ApiKeyRecord }> {
+    return this.request<{ api_key: string; key: ApiKeyRecord }>("/users/me/api-keys", {
+      method: "POST",
+      body: JSON.stringify({
+        name,
+        expires_in_days: expiresInDays,
+      }),
+    });
+  }
+
+  async revokeApiKey(id: string): Promise<void> {
+    return this.request<void>(`/users/me/api-keys/${id}`, {
+      method: "DELETE",
+    });
   }
 
   // ── Generic helpers ──────────────────────────────────────────────────
@@ -394,8 +740,11 @@ class ApiClient {
     });
   }
 
-  async delete<T>(path: string): Promise<T> {
-    return this.request<T>(path, { method: "DELETE" });
+  async delete<T>(path: string, body?: Record<string, unknown>): Promise<T> {
+    return this.request<T>(path, {
+      method: "DELETE",
+      body: body ? JSON.stringify(body) : undefined,
+    });
   }
 }
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { getWsBaseUrl } from "./runtime-config";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -55,7 +56,7 @@ export interface SessionStreamState {
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
-const WS_BASE = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000";
+const WS_BASE = getWsBaseUrl();
 const MAX_RECONNECT_DELAY = 30_000;
 const INITIAL_RECONNECT_DELAY = 1_000;
 
@@ -149,14 +150,7 @@ export function useSessionStream(sessionId: string | null): SessionStreamState {
       wsRef.current.close();
     }
 
-    const token =
-      typeof window !== "undefined"
-        ? localStorage.getItem("codey_token")
-        : null;
-
-    const url = `${WS_BASE}/sessions/${sessionIdRef.current}/stream${
-      token ? `?token=${encodeURIComponent(token)}` : ""
-    }`;
+    const url = `${WS_BASE}/sessions/${sessionIdRef.current}/stream`;
 
     const ws = new WebSocket(url);
     wsRef.current = ws;

@@ -40,7 +40,7 @@ export default function ForgotPasswordPage() {
             Reset your password
           </h1>
           <p className="mb-6 text-sm text-codey-text-dim">
-            Enter your email and we&apos;ll send you a reset link.
+            Enter your email and Codey will attempt to send a reset link if the account exists.
           </p>
 
           {error && (
@@ -51,8 +51,8 @@ export default function ForgotPasswordPage() {
 
           {sent ? (
             <div className="rounded-lg border border-codey-green/30 bg-codey-green-glow px-4 py-3 text-sm text-codey-green">
-              If an account with that email exists, a reset link has been sent.
-              Check your inbox.
+              If an account with that email exists, a reset link has been queued.
+              Check your inbox, and if nothing arrives within a few minutes, try again or contact support.
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
