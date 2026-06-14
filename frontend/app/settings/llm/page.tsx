@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { KeyRound, Loader2, Check, Trash2, AlertTriangle, Cpu } from "lucide-react";
+import DashboardLayout from "@/components/layout/DashboardLayout";
+import { ProtectedRoute } from "@/lib/auth";
 
 const PROVIDER_LABELS: Record<string, string> = {
   openai: "OpenAI",
@@ -92,7 +94,9 @@ export default function LlmSettingsPage() {
     : Object.keys(PROVIDER_LABELS);
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-8">
+    <ProtectedRoute>
+      <DashboardLayout>
+        <div className="mx-auto max-w-3xl space-y-6">
       <div className="mb-6 flex items-center gap-3">
         <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-codey-green/10 text-codey-green">
           <Cpu className="h-5 w-5" />
@@ -194,6 +198,8 @@ export default function LlmSettingsPage() {
           </p>
         </div>
       )}
-    </div>
+        </div>
+      </DashboardLayout>
+    </ProtectedRoute>
   );
 }
