@@ -172,6 +172,10 @@ class SessionDetailResponse(BaseModel):
     es_score_before: float | None
     es_score_after: float | None
     output_summary: str | None
+    run_status: str | None = None
+    verification_passed: bool | None = None
+    health_score: float | None = None
+    patch_receipt: dict | None = None
     error_message: str | None
     started_at: str
     completed_at: str | None
@@ -1120,6 +1124,14 @@ async def get_session(
         ),
         output_summary=_coerce_non_empty_session_text(
             getattr(session, "output_summary", None)
+        ),
+        run_status=_coerce_non_empty_session_text(getattr(session, "run_status", None)),
+        verification_passed=getattr(session, "verification_passed", None),
+        health_score=_coerce_session_float(getattr(session, "health_score", None)),
+        patch_receipt=(
+            getattr(session, "patch_receipt", None)
+            if isinstance(getattr(session, "patch_receipt", None), dict)
+            else None
         ),
         error_message=_coerce_non_empty_session_text(
             getattr(session, "error_message", None)

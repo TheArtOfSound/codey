@@ -105,6 +105,155 @@ type StatusFilter = "all" | "running" | "completed" | "failed";
 
 const PAGE_SIZE = 15;
 
+const RUN_STATUS_META: Record<string, { label: string; cls: string }> = {
+  completed_with_patch: { label: "patch applied", cls: "bg-codey-green/20 text-codey-green" },
+  completed_no_changes: { label: "no changes", cls: "bg-codey-yellow/20 text-codey-yellow" },
+  completed_read_only: { label: "proposed only", cls: "bg-codey-yellow/20 text-codey-yellow" },
+  failed_patch_not_applied: { label: "patch not applied", cls: "bg-codey-red/20 text-codey-red" },
+  failed_verification: { label: "claims failed", cls: "bg-codey-red/20 text-codey-red" },
+  failed_tests: { label: "tests failed", cls: "bg-codey-red/20 text-codey-red" },
+  failed_runtime: { label: "runtime error", cls: "bg-codey-red/20 text-codey-red" },
+};
+
+function triState(v: boolean | null | undefined): { label: string; cls: string } {
+  if (v === true) return { label: "passed", cls: "text-codey-green" };
+  if (v === false) return { label: "failed", cls: "text-codey-red" };
+  return { label: "not run", cls: "text-codey-text-muted" };
+}
+
+// Patch-receipt panel: warnings + claim verification + diff + validation.
+function ReceiptPanel({ session }: { session: Session }) {
+  const r = session.patch_receipt;
+  const filesChanged = r?.filesChanged ?? [];
+  const noFiles = (session.files_modified ?? 0) === 0 || filesChanged.length === 0;
+  const claimFailed = session.verification_passed === false;
+  const v = r?.validation;
+  const noValidation = v
+    ? !(v.syntaxChecked || v.testsPassed || v.buildPassed || v.typecheckPassed || v.lintPassed)
+    : true;
+  const mismatches = (r?.claimsMade ?? []).filter(
+    (c) => c.checkable !== false && !c.matchedByDiff
+  );
+
+  return (
+    <div className="space-y-3">
+      {claimFailed && (
+        <div className="rounded-lg border border-codey-red/40 bg-codey-red-glow px-4 py-3 text-sm text-codey-red">
+          <p className="font-semibold">Claim verification failed.</p>
+          <p>The explanation describes edits that are not present in the actual patch.</p>
+        </div>
+      )}
+      {noFiles && (
+        <div className="rounded-lg border border-codey-yellow/40 bg-codey-yellow/10 px-4 py-3 text-sm text-codey-yellow">
+          <p className="font-semibold">No repository files were changed.</p>
+          <p>This output is a generated suggestion only.</p>
+        </div>
+      )}
+      {noValidation && (
+        <div className="rounded-lg border border-codey-border bg-codey-card px-4 py-2 text-xs text-codey-text-dim">
+          No validation commands were run.
+        </div>
+      )}
+
+      {r && (
+        <div className="flex flex-wrap gap-2 text-xs">
+          {(() => {
+            const meta = RUN_STATUS_META[r.status] ?? {
+              label: r.status,
+              cls: "bg-codey-card text-codey-text-dim",
+            };
+            return (
+              <span className={`rounded-full px-2.5 py-0.5 font-medium ${meta.cls}`}>
+                {meta.label}
+              </span>
+            );
+          })()}
+          <span className="rounded-full bg-codey-card px-2.5 py-0.5 text-codey-text-dim">
+            intent: {r.intent}
+          </span>
+          <span className="rounded-full bg-codey-card px-2.5 py-0.5 text-codey-text-dim">
+            files: {filesChanged.length}
+          </span>
+          <span className="rounded-full bg-codey-card px-2.5 py-0.5">
+            <span className="text-codey-text-muted">claims: </span>
+            <span className={triState(session.verification_passed).cls}>
+              {triState(session.verification_passed).label}
+            </span>
+          </span>
+          {v && (
+            <>
+              <span className="rounded-full bg-codey-card px-2.5 py-0.5">
+                <span className="text-codey-text-muted">tests: </span>
+                <span className={triState(v.testsPassed).cls}>{triState(v.testsPassed).label}</span>
+              </span>
+              <span className="rounded-full bg-codey-card px-2.5 py-0.5">
+                <span className="text-codey-text-muted">build: </span>
+                <span className={triState(v.buildPassed).cls}>{triState(v.buildPassed).label}</span>
+              </span>
+            </>
+          )}
+          {session.health_score !== null && (
+            <span className="rounded-full bg-codey-card px-2.5 py-0.5 text-codey-text-dim">
+              run health: {session.health_score.toFixed(2)}
+            </span>
+          )}
+        </div>
+      )}
+
+      {mismatches.length > 0 && (
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wider text-codey-text-muted">
+            Claim verification
+          </p>
+          <ul className="mt-1 space-y-1">
+            {(r?.claimsMade ?? []).map((c, i) => (
+              <li key={i} className="flex items-start gap-2 text-sm">
+                <span className={c.matchedByDiff || c.checkable === false ? "text-codey-green" : "text-codey-red"}>
+                  {c.matchedByDiff || c.checkable === false ? "✓" : "✗"}
+                </span>
+                <span className="text-codey-text-dim">
+                  {c.claim}
+                  {c.mismatchReason && (
+                    <span className="block text-xs text-codey-red">{c.mismatchReason}</span>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {filesChanged.length > 0 && (
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wider text-codey-text-muted">
+            Files changed
+          </p>
+          <ul className="mt-1 space-y-0.5 text-sm text-codey-text">
+            {filesChanged.map((f, i) => (
+              <li key={i} className="font-mono text-xs">
+                <span className="text-codey-text-dim">{f.changeKind}</span> {f.path}{" "}
+                <span className="text-codey-green">+{f.additions}</span>{" "}
+                <span className="text-codey-red">-{f.deletions}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {r?.diffText && (
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wider text-codey-text-muted">
+            Diff (hash {r.diffHash.slice(0, 12)})
+          </p>
+          <pre className="mt-1 max-h-72 overflow-auto rounded-lg bg-codey-bg p-3 text-xs font-mono text-codey-text-dim">
+            {r.diffText}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function SessionsPage() {
@@ -278,14 +427,28 @@ export default function SessionsPage() {
                           {session.prompt.replace(/^\[(.*?)\]\s*/, "").slice(0, 80)}
                         </td>
                         <td className="px-5 py-3">
-                          <span
-                            className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${statusColor(session.status)}`}
-                          >
-                            {session.status === "running" && (
-                              <Activity className="mr-1 h-3 w-3 animate-pulse" />
+                          <div className="flex flex-col gap-1">
+                            <span
+                              className={`inline-flex w-fit items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${statusColor(session.status)}`}
+                            >
+                              {session.status === "running" && (
+                                <Activity className="mr-1 h-3 w-3 animate-pulse" />
+                              )}
+                              {session.status}
+                            </span>
+                            {session.run_status && RUN_STATUS_META[session.run_status] && (
+                              <span
+                                className={`inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${RUN_STATUS_META[session.run_status].cls}`}
+                              >
+                                {RUN_STATUS_META[session.run_status].label}
+                              </span>
                             )}
-                            {session.status}
-                          </span>
+                            {session.verification_passed === false && (
+                              <span className="inline-flex w-fit items-center gap-1 text-[10px] font-medium text-codey-red">
+                                <AlertTriangle className="h-3 w-3" /> claims unverified
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="hidden px-5 py-3 text-codey-text-dim md:table-cell">
                           <span className="flex items-center gap-1">
@@ -332,6 +495,9 @@ export default function SessionsPage() {
                                   {session.prompt}
                                 </p>
                               </div>
+
+                              {/* Patch receipt: proof of what actually changed */}
+                              <ReceiptPanel session={session} />
 
                               {/* Output summary */}
                               {session.result_summary && (

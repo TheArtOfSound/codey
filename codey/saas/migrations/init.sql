@@ -66,6 +66,10 @@ CREATE TABLE IF NOT EXISTS coding_sessions (
     es_score_before   DOUBLE PRECISION,
     es_score_after    DOUBLE PRECISION,
     output_summary    TEXT,
+    run_status          VARCHAR(40),
+    verification_passed BOOLEAN,
+    health_score        DOUBLE PRECISION,
+    patch_receipt       JSONB,
     error_message     TEXT,
     started_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     completed_at      TIMESTAMPTZ
