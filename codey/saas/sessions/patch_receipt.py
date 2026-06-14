@@ -319,6 +319,23 @@ def _claim_targets(claim: str) -> list[str]:
     return [t for t in toks if t not in stop]
 
 
+_CODE_EXTS = {
+    "ts", "tsx", "js", "jsx", "mjs", "cjs", "py", "md", "json", "css", "scss",
+    "sass", "go", "rs", "java", "rb", "php", "sh", "bash", "yml", "yaml",
+    "toml", "html", "txt", "sql", "c", "cpp", "h", "hpp", "kt", "swift",
+    "vue", "svelte", "ini", "cfg",
+}
+
+
+def _claim_file_paths(claim: str) -> list[str]:
+    """File paths a claim explicitly names (filtered to code/doc extensions)."""
+    out = []
+    for cand in re.findall(r"[A-Za-z0-9_][A-Za-z0-9_./-]*\.[A-Za-z0-9]{1,6}", claim):
+        if cand.rsplit(".", 1)[-1].lower() in _CODE_EXTS:
+            out.append(cand)
+    return out
+
+
 def verify_patch_claims(
     claims: list[str],
     diff_text: str,
@@ -340,6 +357,27 @@ def verify_patch_claims(
     for claim in claims:
         low = claim.lower()
         chk = ClaimCheck(claim=claim)
+
+        # 0) File-path precedence (strongest, least-spoofable signal): any source
+        #    file a claim names as changed MUST be in the changed set. This runs
+        #    before the verb heuristics so "updated/removed ... in foo.ts" cannot
+        #    pass when foo.ts was never touched.
+        named_paths = _claim_file_paths(claim)
+        if named_paths:
+            missing = [
+                p for p in named_paths
+                if not any(
+                    f == p.lower() or f.endswith(p.lower()) or p.lower().endswith(f)
+                    for f in files_low
+                )
+            ]
+            if missing:
+                chk.matchedByDiff = False
+                chk.mismatchReason = (
+                    f"Claim references {missing}, but those files are not in the changed set."
+                )
+                checks.append(chk)
+                continue
 
         # 1) "opened the file" / "Opening" -> result must contain an open action.
         mentions_open = ("open" in low) or ("launch" in low)

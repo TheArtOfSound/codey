@@ -272,3 +272,27 @@ def test_scoring_real_patch_beats_fake():
     assert fake <= 0.20
     assert real >= 0.85
     assert real - fake > 0.6
+
+
+def test_claim_naming_unchanged_files_fails_even_with_coincidental_token():
+    # The sentence has a removal verb and "GEMINI" happens to be in the removed
+    # README text, but it names two code files that were NOT changed.
+    result = verify_patch_claims(
+        [
+            "Updated app/api/generate/route.ts to fix the Gemini prompt handling and "
+            "removed the unused Stripe webhook handler in app/api/stripe/webhook/route.ts."
+        ],
+        diff_text="--- a/README.md\n+++ b/README.md\n-Set the GEMINI_API_KEY here\n+New overview\n",
+        files_changed=["README.md"],
+    )
+    assert result.passed is False
+    assert any("not in the changed set" in (c.mismatchReason or "") for c in result.checks)
+
+
+def test_claim_naming_changed_file_passes():
+    result = verify_patch_claims(
+        ["Updated README.md with an accurate overview."],
+        diff_text="--- a/README.md\n+++ b/README.md\n+overview\n",
+        files_changed=["README.md"],
+    )
+    assert result.passed is True
