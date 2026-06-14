@@ -52,8 +52,9 @@ export default function DashboardLayout({
 
   // Build breadcrumb from pathname
   const segments = pathname.split("/").filter(Boolean);
+  const SEG_LABELS: Record<string, string> = { llm: "API Keys", nfet: "NFET", ci: "CI", pr: "PR", repos: "Repositories" };
   const breadcrumb = segments.map((seg, i) => ({
-    label: seg.charAt(0).toUpperCase() + seg.slice(1),
+    label: SEG_LABELS[seg] ?? seg.charAt(0).toUpperCase() + seg.slice(1),
     href: "/" + segments.slice(0, i + 1).join("/"),
     isLast: i === segments.length - 1,
   }));
