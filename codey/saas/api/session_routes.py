@@ -1289,7 +1289,85 @@ async def commit_session(
             detail="GitHub authentication required to commit code",
         )
 
-    # Charge 1 extra credit for the GitHub commit
+    # Real commit path: clone -> apply generated files -> verify claims against
+    # the real diff -> commit -> push -> open PR. We only charge after a verified
+    # commit; if verification fails we do not charge and report honestly.
+    import shutil as _shutil
+    import subprocess as _sp
+    import httpx as _httpx
+    from sqlalchemy import select as _select, func as _func
+    from codey.saas.models import Repository as _Repository
+    from codey.saas.sessions.repo_executor import RepoExecutor as _RepoExecutor, apply_and_verify as _apply_and_verify
+    from codey.saas.sessions.patch_receipt import RunStatus as _RunStatus
+
+    generated_files = getattr(session, "generated_files", None)
+    if not isinstance(generated_files, dict) or not generated_files:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This session has no generated files to commit. Re-run the generation, then commit.",
+        )
+
+    repo_row = (await db.execute(
+        _select(_Repository).where(
+            _Repository.user_id == current_user.id,
+            _func.lower(_Repository.full_name) == repo_connected.lower(),
+        )
+    )).scalar_one_or_none()
+    clone_url = _coerce_non_empty_session_text(getattr(repo_row, "clone_url", None)) if repo_row else None
+    if not clone_url:
+        clone_url = f"https://github.com/{repo_connected}.git"
+    default_branch = (_coerce_non_empty_session_text(getattr(repo_row, "default_branch", None)) if repo_row else None) or "main"
+    gh_token = _coerce_session_github_token(getattr(current_user, "github_token", None))
+
+    workroot = tempfile.mkdtemp(prefix="codey-commit-")
+    branch = f"codey/session-{str(session.id)[:8]}"
+    try:
+        try:
+            ex = _RepoExecutor.clone(clone_url, f"{workroot}/repo", branch=default_branch, token=gh_token, timeout=180)
+        except Exception as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
+                                detail=f"Could not clone the repository: {str(exc)[:200]}")
+        _sp.run(["git", "checkout", "-b", branch], cwd=ex.workdir, capture_output=True)
+        run = _apply_and_verify(
+            ex, files=generated_files,
+            explanation=_coerce_non_empty_session_text(getattr(session, "output_summary", None)) or "Codey generated patch",
+            writer_model="codey", repo={"name": repo_connected, "branch": branch, "runId": str(session.id)},
+            allow_project_commands=False,
+            commit_message=f"Codey: apply session {str(session.id)[:8]}",
+        )
+        if run.status is not _RunStatus.COMPLETED_WITH_PATCH:
+            _mis = [c.get("mismatchReason") for c in run.receipt.get("claimsMade", [])
+                    if c.get("checkable", True) and not c.get("matchedByDiff")]
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "message": f"Not committed — verification did not pass ({run.status.value}). You were not charged.",
+                    "run_status": run.status.value,
+                    "mismatches": [m for m in _mis if m][:5],
+                    "files_changed": [c["path"] for c in run.receipt.get("filesChanged", [])],
+                },
+            )
+        push_url = f"https://x-access-token:{gh_token}@github.com/{repo_connected}.git"
+        push = _sp.run(["git", "push", push_url, f"HEAD:refs/heads/{branch}"], cwd=ex.workdir, capture_output=True, text=True)
+        if push.returncode != 0:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
+                                detail=f"Push failed: {push.stderr[-200:]}")
+        pr_url = None
+        try:
+            async with _httpx.AsyncClient(timeout=20.0) as _hc:
+                _resp = await _hc.post(
+                    f"https://api.github.com/repos/{repo_connected}/pulls",
+                    headers={"Authorization": f"Bearer {gh_token}", "Accept": "application/vnd.github+json"},
+                    json={"title": f"Codey: session {str(session.id)[:8]}", "head": branch, "base": default_branch,
+                          "body": "Automated, verified patch from a Codey session.\n\nFiles: " + ", ".join(list(generated_files.keys())[:20])},
+                )
+            if _resp.status_code < 300:
+                pr_url = _resp.json().get("html_url")
+        except Exception:
+            pr_url = None
+    finally:
+        _shutil.rmtree(workroot, ignore_errors=True)
+
     commit_cost = CREDIT_COSTS["github_commit"]
     credit_service = CreditService(db)
     try:
@@ -1302,24 +1380,18 @@ async def commit_session(
     except InsufficientCreditsError as exc:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail={
-                "message": "Insufficient credits for commit",
-                "required": exc.required,
-                "available": exc.available,
-            },
+            detail={"message": "Insufficient credits for commit", "required": exc.required, "available": exc.available},
         )
-
-    session.credits_charged = (
-        _coerce_session_int(getattr(session, "credits_charged", None), 0)
-        + commit_cost
-    )
+    session.credits_charged = _coerce_session_int(getattr(session, "credits_charged", None), 0) + commit_cost
     await db.flush()
 
-    # The actual git commit/PR creation would be triggered here asynchronously
+    _commit_after = str(run.receipt.get("commitAfter") or "")[:10]
+    _msg = f"Committed {_commit_after} to branch {branch}"
+    _msg += f" and opened PR: {pr_url}" if pr_url else " (pushed; open a PR on GitHub to merge)."
     return CommitResponse(
         session_id=str(session.id),
         credits_charged=_coerce_session_int(session.credits_charged, 0),
-        message="Commit initiated. Code will be pushed to the connected repository.",
+        message=_msg,
     )
 
 

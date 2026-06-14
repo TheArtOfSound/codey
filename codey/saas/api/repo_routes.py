@@ -1044,14 +1044,7 @@ async def toggle_autonomous_mode(
 ) -> RepoResponse:
     repo = await _load_owned_repo(repo_id, current_user, db)
 
-    # Autonomous mode requires pro plan or above
-    if body.enabled and not _coerce_repo_bool(
-        getattr(current_user, "is_pro_or_above", False)
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Autonomous mode requires the Pro plan or above",
-        )
+    # Autonomous mode is available on all plans (each queued run is credit-metered).
     clone_url = _coerce_repo_clone_url(getattr(repo, "clone_url", None))
     if body.enabled and not clone_url:
         raise HTTPException(

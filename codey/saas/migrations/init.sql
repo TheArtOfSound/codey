@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS coding_sessions (
     verification_passed BOOLEAN,
     health_score        DOUBLE PRECISION,
     patch_receipt       JSONB,
+    generated_files     JSONB,
     error_message     TEXT,
     started_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     completed_at      TIMESTAMPTZ
