@@ -52,6 +52,7 @@ class CodingSession(Base):
     verification_passed: Mapped[Optional[bool]] = mapped_column()
     health_score: Mapped[Optional[float]] = mapped_column(Float)
     patch_receipt: Mapped[Optional[dict]] = mapped_column(JSONB)
+    generated_files: Mapped[Optional[dict]] = mapped_column(JSONB)
     error_message: Mapped[Optional[str]] = mapped_column(Text)
     started_at: Mapped[datetime] = mapped_column(
         server_default=text("now()"), nullable=False

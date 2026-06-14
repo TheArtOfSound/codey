@@ -482,6 +482,7 @@ class SessionRunner:
             _receipt_doc["control"] = lolm_receipt.control
             _receipt_doc["lolm"] = lolm_receipt.to_dict()
             session.patch_receipt = _receipt_doc
+            session.generated_files = files_generated
             session.credits_charged = reserved_credits
             session.lines_generated = total_lines
             session.files_modified = files_modified

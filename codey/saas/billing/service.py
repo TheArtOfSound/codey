@@ -119,6 +119,19 @@ class BillingService:
             )
         return customer_id
 
+    async def _ensure_customer(self, user: User) -> str:
+        """Return the user's Stripe customer id, creating one if absent."""
+        existing = _coerce_non_empty_billing_text(getattr(user, "stripe_customer_id", None))
+        if existing:
+            return existing
+        customer = stripe.Customer.create(
+            email=_coerce_non_empty_billing_text(getattr(user, "email", None)),
+            metadata={"user_id": str(getattr(user, "id", ""))},
+        )
+        user.stripe_customer_id = customer.id
+        await self.db.flush()
+        return customer.id
+
     @staticmethod
     def _has_payment_method(customer_id: str) -> bool:
         methods = stripe.PaymentMethod.list(
@@ -342,7 +355,7 @@ class BillingService:
         await ensure_stripe_catalog_loaded()
         pkg = TOPUP_PACKAGES[package_key]
         user = await self._get_user(user_id)
-        customer_id = self._require_customer(user)
+        customer_id = await self._ensure_customer(user)
 
         payment_intent = stripe.PaymentIntent.create(
             amount=pkg["price"],
