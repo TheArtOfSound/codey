@@ -170,11 +170,17 @@ class ValidationRunner:
 
     @staticmethod
     def run(workdir: str, changed_paths: list[str], *,
-            allow_project_commands: bool = False) -> tuple[Validation, list[CommandRun]]:
+            allow_project_commands: bool = True,
+            install_timeout: int = 600,
+            cmd_timeout: int = 600) -> tuple[Validation, list[CommandRun]]:
+        """Run real validation. Project commands (npm/pytest) execute code, so
+        they run on connected (owned) repos; for untrusted multi-tenant repos
+        wrap this in the E2B sandbox. Reports honestly what ran (None == not run).
+        """
         v = Validation()
         cmds: list[CommandRun] = []
 
-        # 1) Safe syntax checks (no code execution).
+        # 1) Safe syntax checks (no code execution) — always.
         js = [p for p in changed_paths if p.endswith((".js", ".mjs", ".cjs"))]
         py = [p for p in changed_paths if p.endswith(".py")]
         for f in js:
@@ -185,29 +191,47 @@ class ValidationRunner:
         if syntax_cmds:
             v.syntaxChecked = all(c.passed for c in syntax_cmds)
 
-        # 2) Project commands (execute code) — gated; for the sandbox.
-        if allow_project_commands:
-            pkg = os.path.join(workdir, "package.json")
-            scripts = {}
-            if os.path.exists(pkg):
-                try:
-                    import json
-                    scripts = (json.load(open(pkg)).get("scripts") or {})
-                except Exception:
-                    scripts = {}
-            def npm(script, setter):
-                if script in scripts:
-                    c = _run(["npm", "run", script, "--silent"], workdir, timeout=600)
-                    cmds.append(c); setattr(v, setter, c.passed)
-            npm("lint", "lintPassed")
-            npm("typecheck", "typecheckPassed")
-            npm("test", "testsPassed")
-            npm("build", "buildPassed")
-            if os.path.exists(os.path.join(workdir, "pytest.ini")) or any(
-                p.startswith("test") for p in changed_paths
+        if not allow_project_commands:
+            return v, cmds
+
+        # 2) Real project commands.
+        import json
+        pkg = os.path.join(workdir, "package.json")
+        if os.path.exists(pkg):
+            try:
+                manifest = json.load(open(pkg))
+            except Exception:
+                manifest = {}
+            scripts = manifest.get("scripts") or {}
+            deps = {**(manifest.get("dependencies") or {}), **(manifest.get("devDependencies") or {})}
+            # Install deps so tests/build run for real (only when there are deps
+            # and they're not already installed).
+            if deps and not os.path.isdir(os.path.join(workdir, "node_modules")):
+                inst = _run(["npm", "ci", "--no-audit", "--no-fund"], workdir, timeout=install_timeout)
+                if not inst.passed:
+                    inst = _run(["npm", "install", "--no-audit", "--no-fund"], workdir, timeout=install_timeout)
+                cmds.append(inst)
+            for script, setter in (
+                ("lint", "lintPassed"),
+                ("typecheck", "typecheckPassed"),
+                ("test", "testsPassed"),
+                ("build", "buildPassed"),
             ):
-                c = _run(["python3", "-m", "pytest", "-q"], workdir, timeout=600)
-                cmds.append(c); v.testsPassed = c.passed
+                if script in scripts:
+                    c = _run(["npm", "run", script, "--silent"], workdir, timeout=cmd_timeout)
+                    cmds.append(c)
+                    setattr(v, setter, c.passed)
+
+        # Python projects.
+        is_py_project = any(
+            os.path.exists(os.path.join(workdir, f))
+            for f in ("pytest.ini", "pyproject.toml", "setup.cfg", "tox.ini")
+        ) or any(("test" in p and p.endswith(".py")) for p in changed_paths)
+        if is_py_project:
+            c = _run(["python3", "-m", "pytest", "-q"], workdir, timeout=cmd_timeout)
+            cmds.append(c)
+            v.testsPassed = c.passed if v.testsPassed is None else (v.testsPassed and c.passed)
+
         return v, cmds
 
 
@@ -231,7 +255,7 @@ def apply_and_verify(
     writer_model: str = "writer-llm",
     repo: Optional[dict] = None,
     files_read: Optional[list[str]] = None,
-    allow_project_commands: bool = False,
+    allow_project_commands: bool = True,
     es_before: Optional[float] = None,
     es_after: Optional[float] = None,
     commit_message: Optional[str] = None,
@@ -274,11 +298,19 @@ def apply_and_verify(
         (("--check" in c.command) or ("py_compile" in c.command)) and not c.passed
         for c in cmds
     )
+    # A correctness failure (syntax / test / build / typecheck) blocks both the
+    # commit and a successful status. Lint is advisory.
+    validation_failed = (
+        syntax_failed
+        or validation.testsPassed is False
+        or validation.buildPassed is False
+        or validation.typecheckPassed is False
+    )
 
     # Only commit a patch that changed files, whose claims match the diff, and
-    # whose changed sources at least parse.
+    # whose changed sources parse + pass validation.
     commit_after = None
-    if files_modified > 0 and verification.passed and not syntax_failed:
+    if files_modified > 0 and verification.passed and not validation_failed:
         commit_after = executor.commit(commit_message or "Codey: apply verified patch")
 
     gov_ctx = RunGovernorContext(
@@ -296,11 +328,7 @@ def apply_and_verify(
                              files_modified=files_modified, patch_applied=files_modified > 0)
 
     # Base status from reality, then governor gate.
-    tests_failed = (
-        validation.testsPassed is False
-        or validation.buildPassed is False
-        or syntax_failed
-    )
+    tests_failed = validation_failed
     from codey.saas.sessions.patch_receipt import derive_run_status
     base = derive_run_status(
         intent, files_modified, patch_applied=files_modified > 0,
@@ -349,7 +377,7 @@ def branch_and_pick(
     *,
     explanation_for: Callable[[dict], str],
     files_for: Callable[[dict], dict[str, str]],
-    allow_project_commands: bool = False,
+    allow_project_commands: bool = True,
 ) -> tuple[Optional[ExecutedRun], list[dict]]:
     """Run N candidate patches in isolated copies and pick the best.
 
