@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import ARRAY, Float, ForeignKey, Integer, String, Text, text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from codey.saas.models.base import Base
@@ -47,6 +47,11 @@ class CodingSession(Base):
     es_score_before: Mapped[Optional[float]] = mapped_column(Float)
     es_score_after: Mapped[Optional[float]] = mapped_column(Float)
     output_summary: Mapped[Optional[str]] = mapped_column(Text)
+    # --- Patch receipt / verifiable-run trust layer ---
+    run_status: Mapped[Optional[str]] = mapped_column(String(40))
+    verification_passed: Mapped[Optional[bool]] = mapped_column()
+    health_score: Mapped[Optional[float]] = mapped_column(Float)
+    patch_receipt: Mapped[Optional[dict]] = mapped_column(JSONB)
     error_message: Mapped[Optional[str]] = mapped_column(Text)
     started_at: Mapped[datetime] = mapped_column(
         server_default=text("now()"), nullable=False

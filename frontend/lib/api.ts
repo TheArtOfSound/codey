@@ -57,6 +57,45 @@ export interface CreditTransaction {
   created_at: string;
 }
 
+export interface PatchReceiptClaim {
+  claim: string;
+  sourceSection?: string;
+  matchedByDiff: boolean;
+  checkable?: boolean;
+  evidence?: string | null;
+  mismatchReason?: string | null;
+}
+
+export interface PatchReceipt {
+  receiptId: string;
+  runId: string;
+  intent: string;
+  status: string;
+  filesRead: string[];
+  filesChanged: Array<{
+    path: string;
+    additions: number;
+    deletions: number;
+    changeKind: string;
+  }>;
+  diffText: string;
+  diffHash: string;
+  claimsMade: PatchReceiptClaim[];
+  commandsRun: Array<{ command: string; exitCode: number; passed: boolean }>;
+  validation: {
+    syntaxChecked: boolean;
+    typecheckPassed?: boolean | null;
+    lintPassed?: boolean | null;
+    testsPassed?: boolean | null;
+    buildPassed?: boolean | null;
+    claimVerificationPassed: boolean;
+    patchApplied: boolean;
+    filesModifiedCount: number;
+  };
+  healthScore: number;
+  finalSummary: string;
+}
+
 export interface Session {
   id: string;
   mode: string;
@@ -68,6 +107,10 @@ export interface Session {
   health_score_after: number | null;
   lines_generated: number;
   files_modified: number;
+  run_status: string | null;
+  verification_passed: boolean | null;
+  health_score: number | null;
+  patch_receipt: PatchReceipt | null;
   plan: string | null;
   result_summary: string | null;
   error_message: string | null;
@@ -163,6 +206,10 @@ interface SessionApiResponse {
   es_score_before?: number | null;
   es_score_after: number | null;
   output_summary: string | null;
+  run_status?: string | null;
+  verification_passed?: boolean | null;
+  health_score?: number | null;
+  patch_receipt?: PatchReceipt | null;
   error_message?: string | null;
   started_at: string;
   completed_at: string | null;
@@ -339,6 +386,10 @@ class ApiClient {
       health_score_after: data.es_score_after,
       lines_generated: data.lines_generated,
       files_modified: data.files_modified,
+      run_status: data.run_status ?? null,
+      verification_passed: data.verification_passed ?? null,
+      health_score: data.health_score ?? null,
+      patch_receipt: data.patch_receipt ?? null,
       plan: data.nfet_phase_after,
       result_summary: data.output_summary,
       error_message: data.error_message ?? null,

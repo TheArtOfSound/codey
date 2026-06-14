@@ -323,22 +323,128 @@ class SessionRunner:
                 total_lines,
             )
 
-            # ----- 8. Persist results -----
+            # ----- 8. Verify claims + build a patch receipt (no fake completions) -----
+            from uuid import uuid4
+
+            from codey.saas.sessions.patch_receipt import (
+                PatchReceipt,
+                RunIntent,
+                RunStatus,
+                Validation,
+                coarse_status,
+                compute_diff,
+                derive_run_status,
+                extract_claims,
+                sanitize_summary_for_no_change,
+                score_run_health,
+                verify_patch_claims,
+            )
+
+            # This prompt flow *proposes* code; it does not commit to the user's
+            # git repo here, so the receipt is honest about that. A false claim
+            # (explanation describing edits not present in the output) is
+            # rejected regardless of intent.
+            originals: dict[str, str] = {}
+            diff_text, file_changes, diff_hash = compute_diff(originals, files_generated)
+            result_content = "\n".join(files_generated.values())
+            claims = extract_claims(explanation)
+            verification = verify_patch_claims(
+                claims,
+                diff_text,
+                [c.path for c in file_changes],
+                result_content=result_content,
+            )
             files_modified = len(files_generated)
-            session.status = "completed"
+
+            run_status = derive_run_status(
+                RunIntent.PROPOSED_PATCH,
+                files_modified,
+                patch_applied=False,
+                claim_verification_passed=verification.passed,
+            )
+            if not verification.passed:
+                run_status = RunStatus.FAILED_VERIFICATION
+            elif files_modified == 0:
+                run_status = RunStatus.COMPLETED_NO_CHANGES
+
+            validation = Validation(
+                syntaxChecked=after_result is not None,
+                claimVerificationPassed=verification.passed,
+                patchApplied=False,
+                filesModifiedCount=files_modified,
+            )
+            health = score_run_health(
+                intent=RunIntent.PROPOSED_PATCH,
+                patch_applied=False,
+                claim_verification_passed=verification.passed,
+                files_modified_count=files_modified,
+                target_file_changed=None,
+                validation=validation,
+                summary_matches_diff=verification.passed,
+                misleading_claims=not verification.passed,
+            )
+
+            receipt = PatchReceipt(
+                receiptId=str(uuid4()),
+                runId=str(sid),
+                repoId=str(repo_id) if repo_id else None,
+                intent=RunIntent.PROPOSED_PATCH,
+                status=run_status,
+                startedAt=(
+                    session.started_at.isoformat()
+                    if session.started_at
+                    else datetime.utcnow().isoformat()
+                ),
+                completedAt=datetime.utcnow().isoformat(),
+                filesRead=sorted(originals.keys()),
+                filesChanged=file_changes,
+                diffText=diff_text,
+                diffHash=diff_hash,
+                claimsMade=verification.checks,
+                commandsRun=[],
+                validation=validation,
+                phases=[
+                    {"phase": "generate", "ok": True},
+                    {"phase": "compute_diff", "ok": True},
+                    {"phase": "verify_claims", "ok": verification.passed},
+                ],
+                healthBefore=session.es_score_before,
+                healthAfter=session.es_score_after,
+                healthScore=health,
+                finalSummary=(explanation or "")[:2000],
+            )
+
+            summary = explanation or ""
+            if run_status is not RunStatus.COMPLETED_WITH_PATCH:
+                summary = sanitize_summary_for_no_change(summary)
+
+            # ----- 9. Persist results (status derived from reality, not the LLM) -----
+            session.status = coarse_status(run_status)
+            session.run_status = run_status.value
+            session.verification_passed = verification.passed
+            session.health_score = health
+            session.patch_receipt = receipt.to_dict()
             session.credits_charged = reserved_credits
             session.lines_generated = total_lines
             session.files_modified = files_modified
-            session.output_summary = explanation[:500] if explanation else None
+            session.output_summary = summary[:500] if summary else None
             session.completed_at = datetime.utcnow()
             await db.flush()
             await db.commit()
 
             await self._send(session_id, {
                 "type": "complete",
+                "run_status": run_status.value,
+                "verification_passed": verification.passed,
+                "health_score": health,
                 "credits_charged": reserved_credits,
                 "lines_generated": total_lines,
                 "files_modified": files_modified,
+                "claim_mismatches": [
+                    {"claim": c.claim, "reason": c.mismatchReason}
+                    for c in verification.mismatches
+                ],
+                "patch_receipt": receipt.to_dict(),
             })
 
         except Exception as exc:
