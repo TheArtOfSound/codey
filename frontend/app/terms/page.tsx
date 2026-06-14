@@ -1,4 +1,13 @@
+import type { Metadata } from "next";
 import { FileText } from "lucide-react";
+
+export const metadata: Metadata = {
+  title: "Terms of Service",
+  description:
+    "Codey terms of service \u2014 acceptable use, billing, and account terms for the repository-aware coding agent platform.",
+  alternates: { canonical: "/terms" },
+  openGraph: { title: "Terms of Service \u00b7 Codey", url: "/terms" },
+};
 
 export default function TermsPage() {
   return (
