@@ -14,7 +14,7 @@ PLANS: dict[str, dict] = {
         "credits": 10,
         "rollover": 0,
         "features": {
-            "github_repos": 0,
+            "github_repos": 1,
             "autonomous_mode": False,
             "priority": False,
             "max_upload_mb": 5,
