@@ -338,7 +338,7 @@ export default function SettingsPage() {
                 </div>
                 <div>
                   <p className="text-sm font-medium text-codey-text">
-                    {user?.email.split("@")[0]}
+                    {user?.name?.trim() || user?.email?.split("@")[0]}
                   </p>
                   <p className="text-xs capitalize text-codey-text-dim">
                     {user?.plan} plan

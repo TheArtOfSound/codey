@@ -143,10 +143,11 @@ export default function DashboardPage() {
 
   const monthlyCredits =
     user?.plan === "team" ? 1500 : user?.plan === "pro" ? 400 : user?.plan === "starter" ? 100 : 10;
-  const usedCredits = Math.max(0, monthlyCredits - (user?.credits_remaining ?? 0));
+  const creditCap = Math.max(monthlyCredits, user?.credits_remaining ?? 0);
+  const usedCredits = Math.max(0, creditCap - (user?.credits_remaining ?? 0));
   const usagePercent = Math.min(
     100,
-    Math.round((usedCredits / Math.max(monthlyCredits, 1)) * 100)
+    Math.round((usedCredits / Math.max(creditCap, 1)) * 100)
   );
 
   async function handleConnectRepo() {
@@ -181,7 +182,7 @@ export default function DashboardPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-codey-text">
-            Repo control room{user?.email ? `, ${user.email.split("@")[0]}` : ""}
+            Repo control room{user?.name?.trim() ? `, ${user.name.trim()}` : user?.email ? `, ${user.email.split("@")[0]}` : ""}
           </h1>
           <p className="mt-1 text-sm text-codey-text-dim">
             {sessions.length > 0
@@ -205,7 +206,7 @@ export default function DashboardPage() {
             <span className="text-lg font-bold text-codey-text">
               {user?.credits_remaining.toLocaleString()}
             </span>
-            <span className="text-xs text-codey-text-muted">/ {monthlyCredits.toLocaleString()}</span>
+            <span className="text-xs text-codey-text-muted">/ {creditCap.toLocaleString()}</span>
           </div>
           <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-codey-card-hover">
             <div
