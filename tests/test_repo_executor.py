@@ -130,3 +130,53 @@ def test_branch_and_pick_chooses_the_valid_candidate():
         assert len(summaries) == 2
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+PKG = '{"name":"t","version":"1.0.0","scripts":{"test":"node test.js"}}\n'
+TEST_JS = (
+    'const { add } = require("./index.js");\n'
+    'if (add(2, 3) !== 5) { console.error("FAIL"); process.exit(1); }\n'
+    'console.log("ok");\n'
+)
+
+
+def _npm_baseline(tmp: str, add_body: str) -> RepoExecutor:
+    ex = RepoExecutor.init_local(tmp)
+    ex.write_files({
+        "package.json": PKG,
+        "test.js": TEST_JS,
+        "index.js": f"module.exports.add = (a, b) => {add_body};\n",
+    })
+    ex.commit("baseline")
+    return ex
+
+
+def test_real_npm_test_runs_and_passes():
+    tmp = tempfile.mkdtemp(prefix="codey-npm-pass-")
+    try:
+        ex = _npm_baseline(tmp, "a + b")
+        run = apply_and_verify(
+            ex, files={"index.js": "module.exports.add = (a, b) => a + b; // tidy\n"},
+            explanation="Updated index.js with a clarifying comment.", repo={"name": "t"},
+        )
+        assert run.validation.testsPassed is True          # REAL npm test ran + passed
+        assert run.status is RunStatus.COMPLETED_WITH_PATCH
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_real_npm_test_failure_blocks_completion():
+    tmp = tempfile.mkdtemp(prefix="codey-npm-fail-")
+    try:
+        ex = _npm_baseline(tmp, "a + b")
+        before = ex.head()
+        # Patch BREAKS add() -> the real npm test fails.
+        run = apply_and_verify(
+            ex, files={"index.js": "module.exports.add = (a, b) => a - b;\n"},
+            explanation="Updated index.js.", repo={"name": "t"},
+        )
+        assert run.validation.testsPassed is False         # REAL npm test ran + failed
+        assert run.status is RunStatus.FAILED_TESTS
+        assert ex.head() == before                         # not committed
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
