@@ -234,6 +234,94 @@ class ValidationRunner:
 
         return v, cmds
 
+    @staticmethod
+    def run_in_e2b(workdir: str, changed_paths: list[str], *,
+                   cmd_timeout: int = 600) -> tuple[Validation, list[CommandRun]]:
+        """Run project commands inside an isolated E2B sandbox so untrusted repo
+        code never executes on the host. Safe syntax checks still run locally.
+        """
+        import json
+
+        v = Validation()
+        cmds: list[CommandRun] = []
+        for f in [p for p in changed_paths if p.endswith((".js", ".mjs", ".cjs"))]:
+            cmds.append(_run(["node", "--check", f], workdir, timeout=30))
+        for f in [p for p in changed_paths if p.endswith(".py")]:
+            cmds.append(_run(["python3", "-m", "py_compile", f], workdir, timeout=30))
+        syntax_cmds = [c for c in cmds if "--check" in c.command or "py_compile" in c.command]
+        if syntax_cmds:
+            v.syntaxChecked = all(c.passed for c in syntax_cmds)
+
+        try:
+            from e2b_code_interpreter import Sandbox
+        except Exception as exc:
+            cmds.append(CommandRun(command="e2b", exitCode=127, passed=False,
+                                   stderrTail=f"e2b unavailable: {exc}"))
+            return v, cmds
+
+        sb = None
+        try:
+            sb = Sandbox.create()
+            for root, dirs, files in os.walk(workdir):
+                dirs[:] = [d for d in dirs if d not in
+                           (".git", "node_modules", ".next", "dist", "__pycache__", ".venv")]
+                for fn in files:
+                    full = os.path.join(root, fn)
+                    rel = os.path.relpath(full, workdir)
+                    try:
+                        with open(full, "r") as fh:
+                            sb.files.write(rel, fh.read())
+                    except (OSError, UnicodeDecodeError):
+                        continue
+
+            def e2b_run(cmd: str, timeout: int = cmd_timeout) -> CommandRun:
+                try:
+                    r = sb.commands.run(cmd, timeout=timeout)
+                    return CommandRun(command=cmd, exitCode=int(getattr(r, "exit_code", 0) or 0),
+                                      passed=True,
+                                      stdoutTail=(getattr(r, "stdout", "") or "")[-_TAIL:],
+                                      stderrTail=(getattr(r, "stderr", "") or "")[-_TAIL:])
+                except Exception as exc:
+                    res = getattr(exc, "result", None)
+                    return CommandRun(
+                        command=cmd,
+                        exitCode=int(getattr(res, "exit_code", 1) or 1) if res else 1,
+                        passed=False,
+                        stdoutTail=(getattr(res, "stdout", "") or "")[-_TAIL:] if res else "",
+                        stderrTail=(((getattr(res, "stderr", "") or "") if res else "") or str(exc))[-_TAIL:],
+                    )
+
+            pkg = os.path.join(workdir, "package.json")
+            if os.path.exists(pkg):
+                try:
+                    manifest = json.load(open(pkg))
+                except Exception:
+                    manifest = {}
+                scripts = manifest.get("scripts") or {}
+                deps = {**(manifest.get("dependencies") or {}), **(manifest.get("devDependencies") or {})}
+                if deps:
+                    cmds.append(e2b_run("npm ci --no-audit --no-fund || npm install --no-audit --no-fund"))
+                for script, setter in (("lint", "lintPassed"), ("typecheck", "typecheckPassed"),
+                                       ("test", "testsPassed"), ("build", "buildPassed")):
+                    if script in scripts:
+                        c = e2b_run(f"npm run {script} --silent")
+                        cmds.append(c)
+                        setattr(v, setter, c.passed)
+            is_py = any(os.path.exists(os.path.join(workdir, f))
+                        for f in ("pytest.ini", "pyproject.toml", "setup.cfg", "tox.ini")) or \
+                any(("test" in p and p.endswith(".py")) for p in changed_paths)
+            if is_py:
+                c = e2b_run("python3 -m pytest -q")
+                cmds.append(c)
+                v.testsPassed = c.passed if v.testsPassed is None else (v.testsPassed and c.passed)
+        finally:
+            if sb is not None:
+                try:
+                    sb.kill()
+                except Exception:
+                    pass
+        return v, cmds
+
 
 @dataclass
 class ExecutedRun:
@@ -256,6 +344,7 @@ def apply_and_verify(
     repo: Optional[dict] = None,
     files_read: Optional[list[str]] = None,
     allow_project_commands: bool = True,
+    sandbox: Optional[str] = None,
     es_before: Optional[float] = None,
     es_after: Optional[float] = None,
     commit_message: Optional[str] = None,
@@ -287,10 +376,16 @@ def apply_and_verify(
         claims, real_diff, [c.path for c in file_changes], result_content=result_content,
     )
 
-    validation, cmds = ValidationRunner.run(
-        executor.workdir, [c.path for c in file_changes],
-        allow_project_commands=allow_project_commands,
-    )
+    if sandbox == "e2b" and allow_project_commands:
+        # Untrusted project commands execute in an isolated E2B sandbox.
+        validation, cmds = ValidationRunner.run_in_e2b(
+            executor.workdir, [c.path for c in file_changes],
+        )
+    else:
+        validation, cmds = ValidationRunner.run(
+            executor.workdir, [c.path for c in file_changes],
+            allow_project_commands=allow_project_commands,
+        )
     validation.claimVerificationPassed = verification.passed
     validation.patchApplied = files_modified > 0
     validation.filesModifiedCount = files_modified
