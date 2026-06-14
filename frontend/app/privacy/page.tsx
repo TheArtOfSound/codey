@@ -1,4 +1,13 @@
+import type { Metadata } from "next";
 import { Shield } from "lucide-react";
+
+export const metadata: Metadata = {
+  title: "Privacy Policy",
+  description:
+    "How Codey collects, uses, and protects your data \u2014 repositories, account information, and usage. Your code is processed to run the service and is not used to train models.",
+  alternates: { canonical: "/privacy" },
+  openGraph: { title: "Privacy Policy \u00b7 Codey", url: "/privacy" },
+};
 
 export default function PrivacyPage() {
   return (
