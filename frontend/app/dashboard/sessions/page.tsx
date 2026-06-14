@@ -200,6 +200,33 @@ function ReceiptPanel({ session }: { session: Session }) {
         </div>
       )}
 
+      {r?.control && (
+        <div className="rounded-lg border border-codey-border bg-codey-bg/40 px-4 py-3">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+            <span className="font-semibold text-codey-text">Governed by LOLM / NFET</span>
+            <span className="text-codey-text-dim">
+              E_code:{" "}
+              <span className={r.control.nfetFieldEnergy >= 0.55 ? "text-codey-red" : "text-codey-green"}>
+                {r.control.nfetFieldEnergy.toFixed(2)}
+              </span>
+            </span>
+            {typeof r.control.signals?.completionHonestyRisk === "number" && (
+              <span className="text-codey-text-dim">
+                honesty risk: {r.control.signals.completionHonestyRisk.toFixed(2)}
+              </span>
+            )}
+          </div>
+          {r.control.selectedActions?.length > 0 && (
+            <p className="mt-1 font-mono text-[11px] text-codey-text-muted">
+              actions: {r.control.selectedActions.join(" → ")}
+            </p>
+          )}
+          {r.control.reason && (
+            <p className="mt-1 text-[11px] text-codey-text-muted">{r.control.reason}</p>
+          )}
+        </div>
+      )}
+
       {mismatches.length > 0 && (
         <div>
           <p className="text-xs font-medium uppercase tracking-wider text-codey-text-muted">

@@ -373,6 +373,61 @@ class SessionRunner:
                 patchApplied=False,
                 filesModifiedCount=files_modified,
             )
+
+            # ----- 8b. LOLM/NFET governor: signals -> E_code -> actions -> gate -----
+            from codey.saas.sessions.run_governor import (
+                RunGovernorContext,
+                build_lolm_receipt,
+                compute_control_signals,
+                govern_completion,
+                nfet_field_energy,
+                select_actions,
+            )
+
+            gov_ctx = RunGovernorContext(
+                intent=RunIntent.PROPOSED_PATCH,
+                prompt=prompt,
+                files_read=sorted(originals.keys()),
+                file_changes=file_changes,
+                diff_text=diff_text,
+                verification_passed=verification.passed,
+                claims_total=len(verification.checks),
+                claims_mismatched=len(verification.mismatches),
+                validation=validation,
+                patch_applied=False,
+                repo_node_count=graph.node_count,
+                es_before=session.es_score_before,
+                es_after=session.es_score_after,
+            )
+            control_signals = compute_control_signals(gov_ctx)
+            e_code = nfet_field_energy(control_signals)
+            selected_actions = select_actions(
+                control_signals,
+                e_code,
+                intent=RunIntent.PROPOSED_PATCH,
+                files_modified=files_modified,
+                patch_applied=False,
+            )
+            # The governor can only DOWNGRADE a success to an honest failure.
+            run_status, governor_reason = govern_completion(run_status, control_signals, e_code)
+            lolm_receipt = build_lolm_receipt(
+                run_id=str(sid),
+                writer_model=(result.get("model") if isinstance(result, dict) else None)
+                or "writer-llm",
+                repo={"name": repo_id} if repo_id else {},
+                signals=control_signals,
+                e_code=e_code,
+                actions=selected_actions,
+                reason=governor_reason,
+                files_read=sorted(originals.keys()),
+                file_changes=file_changes,
+                diff_hash=diff_hash,
+                patch_applied=False,
+                verification=verification,
+                validation=validation,
+                final_status=run_status,
+            )
+
             health = score_run_health(
                 intent=RunIntent.PROPOSED_PATCH,
                 patch_applied=False,
@@ -423,7 +478,10 @@ class SessionRunner:
             session.run_status = run_status.value
             session.verification_passed = verification.passed
             session.health_score = health
-            session.patch_receipt = receipt.to_dict()
+            _receipt_doc = receipt.to_dict()
+            _receipt_doc["control"] = lolm_receipt.control
+            _receipt_doc["lolm"] = lolm_receipt.to_dict()
+            session.patch_receipt = _receipt_doc
             session.credits_charged = reserved_credits
             session.lines_generated = total_lines
             session.files_modified = files_modified
@@ -437,6 +495,10 @@ class SessionRunner:
                 "run_status": run_status.value,
                 "verification_passed": verification.passed,
                 "health_score": health,
+                "e_code": e_code,
+                "control_signals": lolm_receipt.control["signals"],
+                "selected_actions": [a.value for a in selected_actions],
+                "governor_reason": governor_reason,
                 "credits_charged": reserved_credits,
                 "lines_generated": total_lines,
                 "files_modified": files_modified,
@@ -444,7 +506,7 @@ class SessionRunner:
                     {"claim": c.claim, "reason": c.mismatchReason}
                     for c in verification.mismatches
                 ],
-                "patch_receipt": receipt.to_dict(),
+                "patch_receipt": _receipt_doc,
             })
 
         except Exception as exc:

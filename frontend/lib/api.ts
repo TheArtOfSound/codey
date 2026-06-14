@@ -94,6 +94,12 @@ export interface PatchReceipt {
   };
   healthScore: number;
   finalSummary: string;
+  control?: {
+    signals: Record<string, number>;
+    nfetFieldEnergy: number;
+    selectedActions: string[];
+    reason: string;
+  };
 }
 
 export interface Session {
