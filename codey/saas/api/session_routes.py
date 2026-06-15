@@ -941,9 +941,16 @@ async def create_prompt_session(
         except Exception:
             pass  # Don't fail the response if analysis errors
 
+        try:
+            from codey.saas.api._gen_files import extract_generated_files
+            _gen_files = extract_generated_files(output, body.prompt, body.language or "python")
+        except Exception:
+            _gen_files = {}
         session.status = "completed"
         session.output_summary = output
         session.lines_generated = lines
+        session.generated_files = _gen_files or None
+        session.files_modified = len(_gen_files)
         session.completed_at = datetime.utcnow()
         await db.flush()
 
@@ -1301,6 +1308,17 @@ async def commit_session(
     from codey.saas.sessions.patch_receipt import RunStatus as _RunStatus
 
     generated_files = getattr(session, "generated_files", None)
+    if not isinstance(generated_files, dict) or not generated_files:
+        # Fallback for older sessions: reconstruct files from the stored output.
+        try:
+            from codey.saas.api._gen_files import extract_generated_files
+            generated_files = extract_generated_files(
+                _coerce_non_empty_session_text(getattr(session, "output_summary", None)) or "",
+                _coerce_non_empty_session_text(getattr(session, "prompt", None)) or "",
+                "python",
+            )
+        except Exception:
+            generated_files = {}
     if not isinstance(generated_files, dict) or not generated_files:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
