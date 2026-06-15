@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from typing import Any
 import uuid
@@ -133,6 +134,30 @@ if _SQLALCHEMY_IMPORT_ERROR is None:
 else:
     engine = None
     async_session_factory = None
+
+
+@asynccontextmanager
+async def task_db_session():
+    """DB session from a throwaway NullPool engine bound to the CURRENT loop.
+
+    Celery tasks each run in their own asyncio.run() loop; reusing the pooled
+    global engine across loops raises 'Future attached to a different loop'.
+    This engine is created per task run and disposed on exit.
+    """
+    _require_sqlalchemy()
+    from sqlalchemy.pool import NullPool
+    eng = create_async_engine(
+        _database_url,
+        echo=False,
+        poolclass=NullPool,
+        connect_args=_build_connect_args(_sslmode),
+    )
+    try:
+        maker = async_sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
+        async with maker() as session:
+            yield session
+    finally:
+        await eng.dispose()
 
 
 def _require_sqlalchemy() -> None:

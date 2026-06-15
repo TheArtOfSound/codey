@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -161,8 +162,7 @@ MODELS: dict[str, dict[str, str]] = {
 
 # Fallback models when primary is rate-limited (tried in order)
 FALLBACK_MODELS: list[dict[str, str]] = [
-    # Free models (different providers to spread rate limits)
-    {"provider": "groq", "model": "llama-3.3-70b-versatile"},
+    # Fallbacks (a different model/provider so a per-model daily cap is skipped)
     {"provider": "groq", "model": "llama-3.1-8b-instant"},
     # Paid but extremely cheap fallback (~$0.0001/request) — works when all free are throttled
     {"provider": "openrouter", "model": "deepseek/deepseek-chat"},
@@ -317,6 +317,7 @@ async def call_model(
                 _redact_provider_error(model),
             )
             for fb in FALLBACK_MODELS:
+                await asyncio.sleep(2.0)
                 try:
                     return await _call_model_once(
                         fb["provider"], fb["model"], messages,

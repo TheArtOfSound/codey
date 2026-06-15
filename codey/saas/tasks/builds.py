@@ -194,10 +194,10 @@ def run_build_phase(
     user_id = safe_user_id
 
     async def _run() -> dict:
-        from codey.saas.database import async_session_factory
+        from codey.saas.database import async_session_factory, task_db_session
         from sqlalchemy import text
 
-        async with async_session_factory() as db:
+        async with task_db_session() as db:
             row = await db.execute(
                 text(
                     "SELECT id, name, status, current_phase, total_phases, "

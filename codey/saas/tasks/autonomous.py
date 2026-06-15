@@ -219,10 +219,10 @@ def run_autonomous_repo(self, repo_id: str, user_id: str) -> dict:
     repo_id = safe_repo_id
     user_id = safe_user_id
 
-    from codey.saas.database import async_session_factory
+    from codey.saas.database import async_session_factory, task_db_session
 
     async def _run() -> dict:
-        async with async_session_factory() as db:
+        async with task_db_session() as db:
             from sqlalchemy import text
 
             # Fetch repo config
@@ -412,14 +412,48 @@ def run_autonomous_repo(self, repo_id: str, user_id: str) -> dict:
                     }
                 )
 
-            # 3. Update repo health in DB
+            # 3. Update repo health + append a Run Log activity entry
             try:
+                import json as _json
+                from datetime import datetime as _dt
+                _raw_cfg = repo.get("autonomous_config")
+                if isinstance(_raw_cfg, str):
+                    try:
+                        _cfg = _json.loads(_raw_cfg)
+                    except Exception:
+                        _cfg = {}
+                elif isinstance(_raw_cfg, dict):
+                    _cfg = dict(_raw_cfg)
+                else:
+                    _cfg = {}
+                _log = _cfg.get("activity_log")
+                if not isinstance(_log, list):
+                    _log = []
+                # Projected ES if the queued interventions land, using the
+                # engine's own per-candidate predicted_repo_es_delta. Stress is
+                # the inverse of ES, clamped to the unit interval, so the Run Log
+                # shows current -> projected structural stress (not 0.00/0.00).
+                _proj_es = max(0.0, min(1.0, es_score + sum(
+                    float(_i.get("delta_es", 0.0) or 0.0) for _i in improvements)))
+                _log.append({
+                    "action": f"Autopilot scan: ES {es_score:.2f} ({phase_value}), {len(improvements)} interventions queued",
+                    "timestamp": _dt.utcnow().isoformat() + "Z",
+                    "details": {
+                        "es_score": round(es_score, 3),
+                        "phase": phase_value,
+                        "high_stress": len(hotspots),
+                        "stress_before": round(max(0.0, min(1.0, 1.0 - es_score)), 3),
+                        "stress_after": round(max(0.0, min(1.0, 1.0 - _proj_es)), 3),
+                        "improvements": improvements[:5],
+                    },
+                })
+                _cfg["activity_log"] = _log[-25:]
                 await db.execute(
                     text(
                         "UPDATE repositories SET nfet_phase = :phase, es_score = :es, "
-                        "last_analyzed = now() WHERE id = :rid"
+                        "last_analyzed = now(), autonomous_config = CAST(:cfg AS JSONB) WHERE id = :rid"
                     ),
-                    {"phase": phase_value, "es": es_score, "rid": repo_id},
+                    {"phase": phase_value, "es": es_score, "rid": repo_id, "cfg": _json.dumps(_cfg)},
                 )
                 await db.commit()
             except Exception as exc:
@@ -459,11 +493,11 @@ def run_autonomous_repo(self, repo_id: str, user_id: str) -> dict:
 )
 def run_all_autonomous_repos(self) -> dict:
     """Fan out autonomous runs for every enabled repository."""
-    from codey.saas.database import async_session_factory
+    from codey.saas.database import async_session_factory, task_db_session
 
     async def _fan_out() -> dict:
         try:
-            async with async_session_factory() as db:
+            async with task_db_session() as db:
                 from sqlalchemy import text
 
                 dispatch_limit = _coerce_autonomous_dispatch_limit(
