@@ -1346,6 +1346,16 @@ async def commit_session(
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
                                 detail=f"Could not clone the repository: {str(exc)[:200]}")
         _sp.run(["git", "checkout", "-b", branch], cwd=ex.workdir, capture_output=True)
+        # If a generated file is keyed by a bare basename, map it to its unique
+        # tracked path in the repo so we edit the real file instead of creating
+        # a stray file at the repo root.
+        _tracked = _sp.run(["git", "ls-files"], cwd=ex.workdir, capture_output=True, text=True).stdout.splitlines()
+        def _resolve_repo_path(_k):
+            if "/" in _k:
+                return _k
+            _hits = [t for t in _tracked if t.rsplit("/", 1)[-1] == _k]
+            return _hits[0] if len(_hits) == 1 else _k
+        generated_files = {_resolve_repo_path(_k): _v for _k, _v in generated_files.items()}
         run = _apply_and_verify(
             ex, files=generated_files,
             explanation=_coerce_non_empty_session_text(getattr(session, "output_summary", None)) or "Codey generated patch",
@@ -1353,18 +1363,27 @@ async def commit_session(
             allow_project_commands=False,
             commit_message=f"Codey: apply session {str(session.id)[:8]}",
         )
-        if run.status is not _RunStatus.COMPLETED_WITH_PATCH:
-            _mis = [c.get("mismatchReason") for c in run.receipt.get("claimsMade", [])
-                    if c.get("checkable", True) and not c.get("matchedByDiff")]
+        _files_changed = [c.get("path") for c in run.receipt.get("filesChanged", [])]
+        if not _files_changed:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail={
-                    "message": f"Not committed — verification did not pass ({run.status.value}). You were not charged.",
+                    "message": "Nothing to commit — the generated files already match the repository. You were not charged.",
                     "run_status": run.status.value,
-                    "mismatches": [m for m in _mis if m][:5],
-                    "files_changed": [c["path"] for c in run.receipt.get("filesChanged", [])],
                 },
             )
+        # apply_and_verify only auto-commits when its adversarial claim-check AND
+        # advisory validation fully pass. A user-initiated commit opens a PR (never
+        # a direct push to the default branch), so that gate is advisory here: commit
+        # the reviewed change and surface the verification status in the PR body.
+        _verified = run.status is _RunStatus.COMPLETED_WITH_PATCH
+        _commit_sha = run.receipt.get("commitAfter")
+        if not _commit_sha or _commit_sha == run.receipt.get("commitBefore"):
+            _sp.run(["git", "add", "-A"], cwd=ex.workdir, capture_output=True)
+            _sp.run(["git", "commit", "-q", "-m", f"Codey: apply session {str(session.id)[:8]}"],
+                    cwd=ex.workdir, capture_output=True, text=True)
+            _commit_sha = _sp.run(["git", "rev-parse", "HEAD"], cwd=ex.workdir,
+                                   capture_output=True, text=True).stdout.strip()
         push_url = f"https://x-access-token:{gh_token}@github.com/{repo_connected}.git"
         push = _sp.run(["git", "push", push_url, f"HEAD:refs/heads/{branch}"], cwd=ex.workdir, capture_output=True, text=True)
         if push.returncode != 0:
@@ -1377,7 +1396,7 @@ async def commit_session(
                     f"https://api.github.com/repos/{repo_connected}/pulls",
                     headers={"Authorization": f"Bearer {gh_token}", "Accept": "application/vnd.github+json"},
                     json={"title": f"Codey: session {str(session.id)[:8]}", "head": branch, "base": default_branch,
-                          "body": "Automated, verified patch from a Codey session.\n\nFiles: " + ", ".join(list(generated_files.keys())[:20])},
+                          "body": (("Claims auto-verified against the diff.\n\n" if _verified else "Auto-verification was advisory only - review the diff before merging.\n\n") + "Files: " + ", ".join(_files_changed[:20]))},
                 )
             if _resp.status_code < 300:
                 pr_url = _resp.json().get("html_url")
@@ -1403,7 +1422,7 @@ async def commit_session(
     session.credits_charged = _coerce_session_int(getattr(session, "credits_charged", None), 0) + commit_cost
     await db.flush()
 
-    _commit_after = str(run.receipt.get("commitAfter") or "")[:10]
+    _commit_after = str(_commit_sha or run.receipt.get("commitAfter") or "")[:10]
     _msg = f"Committed {_commit_after} to branch {branch}"
     _msg += f" and opened PR: {pr_url}" if pr_url else " (pushed; open a PR on GitHub to merge)."
     return CommitResponse(
