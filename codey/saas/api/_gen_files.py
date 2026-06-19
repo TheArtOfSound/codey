@@ -24,8 +24,12 @@ def extract_generated_files(output: str, prompt: str, language: str) -> dict:
     path named in the prompt (for a single block), else a generated default.
     """
     files: dict = {}
-    pm = _PATH.search(prompt or "")
-    prompt_path = pm.group(0) if pm else None
+    _pmatches = _PATH.findall(prompt or "")
+    _slashed = [m for m in _pmatches if "/" in m]
+    # Prefer the longest repo-relative path (one with a slash) over a bare
+    # basename, so "fix foo.js in `pkg/bin/foo.js`" targets pkg/bin/foo.js
+    # rather than creating a stray foo.js at the repo root.
+    prompt_path = max(_slashed, key=len) if _slashed else (_pmatches[0] if _pmatches else None)
     lang_default = (language or "python").lower()
     blocks = _FENCE.findall(output or "")
     for i, (info, code) in enumerate(blocks):
