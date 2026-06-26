@@ -1,11 +1,12 @@
 # CODEY
 
-**AI-powered code generation platform that builds production-ready software.**
+**Repository-aware coding and structural health platform for real codebases.**
 
 ## What Codey Does
 
-- **Intelligent Code Generation** -- Describe what you want in natural language and Codey generates complete, tested codebases using NFET-guided quality analysis and multi-provider LLM routing.
-- **Autonomous Repository Management** -- Connect your GitHub repos and Codey continuously monitors, analyzes, and submits PRs with improvements, refactors, and security fixes on a nightly schedule.
+- **Structural Health Analysis** -- Codey models repository dependencies, stress, and code-health signals so it can reason about system-level impact instead of only individual files.
+- **Repository-Aware Generation** -- Describe what you want in natural language and Codey generates code with NFET-guided quality analysis and multi-provider LLM routing.
+- **Autonomous Repository Management** -- Connect your GitHub repos and Codey can monitor, analyze, and prepare maintenance actions on a recurring schedule.
 - **Adaptive Memory System** -- Codey learns your coding style, framework preferences, and project conventions across sessions, producing code that feels like yours from day one.
 
 ## Tech Stack
@@ -27,7 +28,7 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/qira-ai/codey.git
+git clone https://github.com/TheArtOfSound/codey.git
 cd codey
 
 # Copy the environment template and fill in your keys
@@ -38,6 +39,35 @@ docker-compose up --build
 ```
 
 The API will be available at `http://localhost:8000` and the frontend at `http://localhost:3000`.
+
+Current parser coverage for structural analysis is focused on Python, JavaScript, TypeScript, JSX, and TSX.
+
+## Production Deployment Notes
+
+Production deployments are expected to run behind a single-domain reverse proxy so the frontend can call:
+
+- `/api/proxy/*` for HTTP API traffic
+- `/sessions/*` for session websocket streams
+- `/build/*/stream` for build websocket streams
+
+For the intended production hostname, use:
+
+- `FRONTEND_URL=https://codey.imagineqira.com`
+- `API_URL=https://codey.imagineqira.com/api/proxy`
+
+OAuth only works after the provider dashboards are configured with the backend callback URLs:
+
+- GitHub: `https://codey.imagineqira.com/api/proxy/auth/github/callback`
+- Google: `https://codey.imagineqira.com/api/proxy/auth/google/callback`
+
+## Local Tests
+
+```bash
+python3 -m pip install -e ".[dev]"
+python3 -m pytest
+```
+
+The `dev` extra installs the runtime package plus the pytest tooling used by the backend tests.
 
 ## Project Structure
 
@@ -78,6 +108,8 @@ codey/
 | `DATABASE_URL` | PostgreSQL connection string |
 | `REDIS_URL` | Redis connection string |
 | `SECRET_KEY` | JWT signing secret |
+| `CODEY_ENV` | Runtime environment (`development` or `production`) |
+| `CODEY_BOOTSTRAP_STRIPE_ON_STARTUP` | Opt-in Stripe catalog bootstrap for one-off admin runs |
 | `STRIPE_SECRET_KEY` | Stripe API secret key |
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret |
 | `GITHUB_CLIENT_ID` | GitHub OAuth app client ID |

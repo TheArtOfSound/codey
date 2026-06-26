@@ -38,9 +38,6 @@ export const stripeAppearance: Appearance = {
     fontSizeBase: "14px",
     spacingUnit: "4px",
     borderRadius: "8px",
-    colorIconCardCvc: "#8888a0",
-    colorIconCardExpiry: "#8888a0",
-    colorIconCardNumber: "#8888a0",
   },
   rules: {
     ".Input": {
@@ -118,6 +115,7 @@ interface PaymentFormProps {
   onError?: (error: string) => void;
   submitLabel?: string;
   loading?: boolean;
+  returnUrl?: string;
 }
 
 export function PaymentForm({
@@ -125,6 +123,7 @@ export function PaymentForm({
   onError,
   submitLabel = "Pay",
   loading: externalLoading,
+  returnUrl,
 }: PaymentFormProps) {
   const stripe = useStripe();
   const elements = useElements();
@@ -145,7 +144,8 @@ export function PaymentForm({
       const result = await stripe.confirmPayment({
         elements,
         confirmParams: {
-          return_url: `${window.location.origin}/credits?payment=success`,
+          return_url:
+            returnUrl || `${window.location.origin}/credits?payment=success`,
         },
         redirect: "if_required",
       });
@@ -160,7 +160,7 @@ export function PaymentForm({
         setSubmitting(false);
       }
     },
-    [stripe, elements, onSuccess, onError]
+    [stripe, elements, onSuccess, onError, returnUrl]
   );
 
   const isLoading = submitting || externalLoading;
@@ -202,9 +202,10 @@ export function PaymentForm({
 interface SetupFormProps {
   onSuccess: (setupIntentId: string) => void;
   onError?: (error: string) => void;
+  returnUrl?: string;
 }
 
-export function SetupForm({ onSuccess, onError }: SetupFormProps) {
+export function SetupForm({ onSuccess, onError, returnUrl }: SetupFormProps) {
   const stripe = useStripe();
   const elements = useElements();
   const [submitting, setSubmitting] = useState(false);
@@ -224,7 +225,8 @@ export function SetupForm({ onSuccess, onError }: SetupFormProps) {
       const result = await stripe.confirmSetup({
         elements,
         confirmParams: {
-          return_url: `${window.location.origin}/settings?setup=success`,
+          return_url:
+            returnUrl || `${window.location.origin}/settings?setup=success`,
         },
         redirect: "if_required",
       });
@@ -239,7 +241,7 @@ export function SetupForm({ onSuccess, onError }: SetupFormProps) {
         setSubmitting(false);
       }
     },
-    [stripe, elements, onSuccess, onError]
+    [stripe, elements, onSuccess, onError, returnUrl]
   );
 
   return (

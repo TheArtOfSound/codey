@@ -70,7 +70,7 @@
 const user = JSON.parse(localStorage.getItem('codey_user') || '{}');
 const userId = user.id || 'unknown';
 const refCode = userId.substring(0, 8);
-const refLink = 'https://theartofsound.github.io/codey/signup.html?ref=' + refCode;
+const refLink = 'https://codey.imagineqira.com/auth/signup?ref=' + refCode;
 
 document.getElementById('ref-link').value = refLink;
 document.getElementById('share-x').href = 'https://twitter.com/intent/tweet?text=' + encodeURIComponent('I\'ve been using Codey — the coding AI that actually understands codebase structure. Get 50 free credits: ' + refLink);

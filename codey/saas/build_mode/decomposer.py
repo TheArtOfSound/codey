@@ -7,6 +7,8 @@ import re
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 
+from codey.saas.build_mode.path_utils import normalize_plan_file_path
+
 logger = logging.getLogger(__name__)
 
 # File type classification priorities (lower = earlier phase)
@@ -45,6 +47,38 @@ _FILE_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("static", re.compile(r"(public/|static/|assets/)", re.IGNORECASE)),
     ("test", re.compile(r"(tests?/|test_|_test\.|\.test\.|\.spec\.|__tests__/|specs?/)", re.IGNORECASE)),
 ]
+
+
+def _coerce_file_tree(value: object) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    file_tree: dict[str, str] = {}
+    for path, file_hint in value.items():
+        normalized_path = normalize_plan_file_path(path)
+        if normalized_path is None:
+            continue
+        file_tree[normalized_path] = file_hint if isinstance(file_hint, str) else ""
+    return file_tree
+
+
+def _coerce_phase_specs(value: object) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    return [entry for entry in value if isinstance(entry, dict)]
+
+
+def _coerce_phase_files(value: object) -> list[str]:
+    if isinstance(value, str):
+        candidate = normalize_plan_file_path(value)
+        return [candidate] if candidate is not None else []
+    if not isinstance(value, (list, tuple)):
+        return []
+    files: list[str] = []
+    for raw in value:
+        candidate = normalize_plan_file_path(raw)
+        if candidate is not None:
+            files.append(candidate)
+    return files
 
 
 @dataclass
@@ -86,8 +120,9 @@ class TaskDecomposer:
         list[TaskNode]
             Topologically sorted task list ready for sequential generation.
         """
-        file_tree = project_plan.get("file_tree", {})
-        phases_spec = project_plan.get("phases", [])
+        plan = project_plan if isinstance(project_plan, dict) else {}
+        file_tree = _coerce_file_tree(plan.get("file_tree"))
+        phases_spec = _coerce_phase_specs(plan.get("phases"))
 
         if not file_tree:
             logger.warning("Empty file_tree in project plan — nothing to decompose")
@@ -339,8 +374,8 @@ class TaskDecomposer:
         # Build path -> phase mapping from spec
         path_to_phase: dict[str, int] = {}
         for i, phase_def in enumerate(phases_spec):
-            for fp in phase_def.get("files", []):
-                path_to_phase[fp] = i
+            for fp in _coerce_phase_files(phase_def.get("files")):
+                path_to_phase.setdefault(fp, i)
 
         for task in tasks:
             if task.file_path in path_to_phase:

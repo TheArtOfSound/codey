@@ -15,7 +15,20 @@ logger = logging.getLogger(__name__)
 # Environment detection
 # ---------------------------------------------------------------------------
 
-_IS_PRODUCTION = os.getenv("CODEY_ENV", "development").lower() == "production"
+
+def _coerce_non_empty_security_env_text(value: str | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if any(ord(char) < 32 or ord(char) == 127 for char in normalized):
+        return None
+    return normalized or None
+
+
+_IS_PRODUCTION = (
+    (_coerce_non_empty_security_env_text(os.getenv("CODEY_ENV")) or "development").lower()
+    == "production"
+)
 
 # ---------------------------------------------------------------------------
 # Content-Security-Policy — restrictive default, relax per-route as needed.
@@ -49,6 +62,21 @@ class SecurityMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: ASGIApp) -> None:
         super().__init__(app)
 
+    @staticmethod
+    def _apply_security_headers(response: Response) -> Response:
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains"
+        )
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Content-Security-Policy"] = _CSP
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = (
+            "camera=(), microphone=(), geolocation=()"
+        )
+        return response
+
     async def dispatch(
         self,
         request: Request,
@@ -65,10 +93,12 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             duration_ms = (time.monotonic() - start) * 1000
             self._log_request(request, 500, duration_ms)
             if _IS_PRODUCTION:
-                return Response(
-                    content='{"detail":"Internal server error"}',
-                    status_code=500,
-                    media_type="application/json",
+                return self._apply_security_headers(
+                    Response(
+                        content='{"detail":"Internal server error"}',
+                        status_code=500,
+                        media_type="application/json",
+                    )
                 )
             raise
 
@@ -77,17 +107,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         # ------------------------------------------------------------------
         # Security headers
         # ------------------------------------------------------------------
-        response.headers["Strict-Transport-Security"] = (
-            "max-age=31536000; includeSubDomains"
-        )
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Content-Security-Policy"] = _CSP
-        response.headers["X-XSS-Protection"] = "1; mode=block"
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Permissions-Policy"] = (
-            "camera=(), microphone=(), geolocation=()"
-        )
+        response = self._apply_security_headers(response)
 
         # ------------------------------------------------------------------
         # Strip sensitive details from error responses in production
@@ -116,16 +136,33 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         Returns ``None`` if no valid JWT is present — this is expected for
         unauthenticated endpoints.
         """
-        auth = request.headers.get("authorization", "")
-        if not auth.startswith("Bearer "):
-            return None
         try:
-            from codey.saas.auth.jwt import decode_access_token
-
-            payload = decode_access_token(auth.split(" ", 1)[1])
-            return payload.get("sub")
+            from codey.saas.auth.cookies import SESSION_COOKIE_NAME
+            from codey.saas.auth.jwt import decode_access_token, normalize_access_token_candidate
         except Exception:
             return None
+
+        auth = request.headers.get("authorization", "")
+        candidates: list[object] = []
+        if isinstance(auth, str):
+            auth_parts = auth.strip().split(None, 1)
+            if len(auth_parts) == 2 and auth_parts[0].lower() == "bearer":
+                candidates.append(auth_parts[1])
+        candidates.append(request.cookies.get(SESSION_COOKIE_NAME))
+
+        for candidate in candidates:
+            normalized = normalize_access_token_candidate(candidate)
+            if normalized is None:
+                continue
+            try:
+                payload = decode_access_token(normalized)
+            except Exception:
+                continue
+            subject = normalize_access_token_candidate(payload.get("sub"))
+            if subject is not None:
+                return subject
+
+        return None
 
     @staticmethod
     def _log_request(

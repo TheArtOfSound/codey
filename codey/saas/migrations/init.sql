@@ -63,6 +63,10 @@ CREATE TABLE IF NOT EXISTS coding_sessions (
     es_score_before   DOUBLE PRECISION,
     es_score_after    DOUBLE PRECISION,
     output_summary    TEXT,
+    run_status          VARCHAR(40),
+    verification_passed BOOLEAN,
+    health_score        DOUBLE PRECISION,
+    patch_receipt       JSONB,
     error_message     TEXT,
     started_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     completed_at      TIMESTAMPTZ
@@ -336,8 +340,31 @@ CREATE INDEX IF NOT EXISTS idx_build_checkpoints_project_id ON build_checkpoints
 -- ROW LEVEL SECURITY
 -- ============================================================================
 
--- Enable RLS on all user-scoped tables
-ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+-- App-managed RLS helper. The API sets app.current_user_id per request.
+CREATE OR REPLACE FUNCTION codey_current_user_id()
+RETURNS UUID AS $$
+DECLARE
+    raw_uid TEXT;
+BEGIN
+    raw_uid := nullif(current_setting('app.current_user_id', true), '');
+    IF raw_uid IS NULL THEN
+        RETURN NULL;
+    END IF;
+
+    RETURN raw_uid::UUID;
+EXCEPTION
+    WHEN invalid_text_representation THEN
+        RETURN NULL;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+-- The users and security_audit_log tables stay app-managed because
+-- unauthenticated signup/login and internal audit writes must work before a
+-- request has an authenticated user context.
+ALTER TABLE users DISABLE ROW LEVEL SECURITY;
+ALTER TABLE security_audit_log DISABLE ROW LEVEL SECURITY;
+
+-- Enable RLS on user-scoped tables
 ALTER TABLE credit_transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE coding_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE repositories ENABLE ROW LEVEL SECURITY;
@@ -349,79 +376,90 @@ ALTER TABLE exports ENABLE ROW LEVEL SECURITY;
 ALTER TABLE referrals ENABLE ROW LEVEL SECURITY;
 ALTER TABLE session_costs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE api_keys ENABLE ROW LEVEL SECURITY;
-ALTER TABLE security_audit_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE build_projects ENABLE ROW LEVEL SECURITY;
 ALTER TABLE build_files ENABLE ROW LEVEL SECURITY;
 ALTER TABLE build_checkpoints ENABLE ROW LEVEL SECURITY;
 
--- Users can only read/update their own row
-CREATE POLICY users_self ON users
-    FOR ALL USING (id = auth.uid());
-
 -- Credit transactions: users see only their own
 CREATE POLICY credit_transactions_owner ON credit_transactions
-    FOR ALL USING (user_id = auth.uid());
+    FOR ALL USING (user_id = codey_current_user_id())
+    WITH CHECK (user_id = codey_current_user_id());
 
 -- Coding sessions: users see only their own
 CREATE POLICY coding_sessions_owner ON coding_sessions
-    FOR ALL USING (user_id = auth.uid());
+    FOR ALL USING (user_id = codey_current_user_id())
+    WITH CHECK (user_id = codey_current_user_id());
 
 -- Repositories: users see only their own
 CREATE POLICY repositories_owner ON repositories
-    FOR ALL USING (user_id = auth.uid());
+    FOR ALL USING (user_id = codey_current_user_id())
+    WITH CHECK (user_id = codey_current_user_id());
 
 -- User memory: users see only their own
 CREATE POLICY user_memory_owner ON user_memory
-    FOR ALL USING (user_id = auth.uid());
+    FOR ALL USING (user_id = codey_current_user_id())
+    WITH CHECK (user_id = codey_current_user_id());
 
 -- Memory update logs: users see only their own
 CREATE POLICY memory_update_logs_owner ON memory_update_logs
-    FOR ALL USING (user_id = auth.uid());
+    FOR ALL USING (user_id = codey_current_user_id())
+    WITH CHECK (user_id = codey_current_user_id());
 
 -- Projects: users see only their own
 CREATE POLICY projects_owner ON projects
-    FOR ALL USING (user_id = auth.uid());
+    FOR ALL USING (user_id = codey_current_user_id())
+    WITH CHECK (user_id = codey_current_user_id());
 
 -- Project versions: users see versions of their own projects
 CREATE POLICY project_versions_owner ON project_versions
     FOR ALL USING (
-        project_id IN (SELECT id FROM projects WHERE user_id = auth.uid())
+        project_id IN (SELECT id FROM projects WHERE user_id = codey_current_user_id())
+    ) WITH CHECK (
+        project_id IN (SELECT id FROM projects WHERE user_id = codey_current_user_id())
     );
 
 -- Exports: users see only their own
 CREATE POLICY exports_owner ON exports
-    FOR ALL USING (user_id = auth.uid());
+    FOR ALL USING (user_id = codey_current_user_id())
+    WITH CHECK (user_id = codey_current_user_id());
 
 -- Referrals: users see referrals they created or were referred by
 CREATE POLICY referrals_owner ON referrals
-    FOR ALL USING (referrer_id = auth.uid() OR referred_id = auth.uid());
+    FOR ALL USING (
+        referrer_id = codey_current_user_id() OR referred_id = codey_current_user_id()
+    ) WITH CHECK (
+        referrer_id = codey_current_user_id() OR referred_id = codey_current_user_id()
+    );
 
 -- Session costs: users see only their own
 CREATE POLICY session_costs_owner ON session_costs
-    FOR ALL USING (user_id = auth.uid());
+    FOR ALL USING (user_id = codey_current_user_id())
+    WITH CHECK (user_id = codey_current_user_id());
 
 -- API keys: users see only their own
 CREATE POLICY api_keys_owner ON api_keys
-    FOR ALL USING (user_id = auth.uid());
-
--- Security audit log: users see only their own entries
-CREATE POLICY security_audit_log_owner ON security_audit_log
-    FOR SELECT USING (user_id = auth.uid());
+    FOR ALL USING (user_id = codey_current_user_id())
+    WITH CHECK (user_id = codey_current_user_id());
 
 -- Build projects: users see only their own
 CREATE POLICY build_projects_owner ON build_projects
-    FOR ALL USING (user_id = auth.uid());
+    FOR ALL USING (user_id = codey_current_user_id())
+    WITH CHECK (user_id = codey_current_user_id());
 
 -- Build files: users see files of their own build projects
 CREATE POLICY build_files_owner ON build_files
     FOR ALL USING (
-        project_id IN (SELECT id FROM build_projects WHERE user_id = auth.uid())
+        project_id IN (SELECT id FROM build_projects WHERE user_id = codey_current_user_id())
+    ) WITH CHECK (
+        project_id IN (SELECT id FROM build_projects WHERE user_id = codey_current_user_id())
     );
 
 -- Build checkpoints: users see checkpoints of their own build projects
 CREATE POLICY build_checkpoints_owner ON build_checkpoints
     FOR ALL USING (
-        project_id IN (SELECT id FROM build_projects WHERE user_id = auth.uid())
+        project_id IN (SELECT id FROM build_projects WHERE user_id = codey_current_user_id())
+    ) WITH CHECK (
+        project_id IN (SELECT id FROM build_projects WHERE user_id = codey_current_user_id())
     );
 
 -- ============================================================================
@@ -448,7 +486,8 @@ CREATE INDEX IF NOT EXISTS idx_project_memories_embedding ON project_memories US
 ALTER TABLE project_memories ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY project_memories_owner ON project_memories
-    FOR ALL USING (user_id = auth.uid());
+    FOR ALL USING (user_id = codey_current_user_id())
+    WITH CHECK (user_id = codey_current_user_id());
 
 -- ============================================================================
 -- COST OVERFLOW EVENTS
@@ -468,7 +507,8 @@ CREATE TABLE IF NOT EXISTS cost_overflow_events (
 ALTER TABLE cost_overflow_events ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY cost_overflow_events_owner ON cost_overflow_events
-    FOR ALL USING (user_id = auth.uid());
+    FOR ALL USING (user_id = codey_current_user_id())
+    WITH CHECK (user_id = codey_current_user_id());
 
 -- ============================================================================
 -- SERVICE ROLE BYPASS

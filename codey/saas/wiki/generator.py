@@ -4,8 +4,9 @@ import json
 import logging
 import os
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from codey.saas.intelligence.providers import call_model, resolve_model
@@ -68,6 +69,111 @@ _IGNORE_DIRS = {
 
 MAX_FILE_SIZE = 100_000  # 100 KB — skip larger files
 MAX_FILES_TO_PARSE = 200
+
+
+def _is_safe_project_file(path: Path, root_resolved: Path) -> bool:
+    try:
+        resolved = path.resolve()
+        if root_resolved not in {resolved, *resolved.parents}:
+            return False
+        if not path.is_file():
+            return False
+        return path.stat().st_size <= MAX_FILE_SIZE
+    except OSError:
+        return False
+
+
+def _read_safe_project_text(path: Path, root: Path) -> str:
+    if not _is_safe_project_file(path, root.resolve()):
+        return ""
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            content = handle.read(MAX_FILE_SIZE + 1)
+    except OSError:
+        return ""
+    if len(content) > MAX_FILE_SIZE:
+        return ""
+    return content
+
+
+def _iter_safe_project_files(root: Path, pattern: str) -> Iterator[Path]:
+    root_resolved = root.resolve()
+    for path in root.rglob(pattern):
+        if any(part in _IGNORE_DIRS for part in path.parts):
+            continue
+        if _is_safe_project_file(path, root_resolved):
+            yield path
+
+
+def _coerce_wiki_text(value: object) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, dict):
+        for key in ("content", "text", "code", "output"):
+            candidate = value.get(key)
+            if candidate is None:
+                continue
+            normalized = _coerce_wiki_text(candidate)
+            if normalized:
+                return normalized
+        return ""
+    if not isinstance(value, list):
+        return ""
+
+    parts: list[str] = []
+    for item in value:
+        candidate = _coerce_wiki_text(item).strip()
+        if candidate:
+            parts.append(candidate)
+    return "\n".join(parts)
+
+
+def _wiki_text_or_fallback(value: object, fallback: str) -> str:
+    text = _coerce_wiki_text(value)
+    return text if text.strip() else fallback
+
+
+def _build_architecture_fallback(
+    project_name: str,
+    file_tree: str,
+    code_summary: str,
+) -> str:
+    details = code_summary.strip() or file_tree.strip()
+    if details:
+        return (
+            f"Architecture overview for {project_name} could not be generated "
+            f"automatically.\n\n{details[:1000]}"
+        )
+    return (
+        f"Architecture overview for {project_name} could not be generated "
+        "automatically because no project files were discovered."
+    )
+
+
+def _build_wiki_diff_fallback(changes: list[str]) -> str:
+    if not changes:
+        return "No visible documentation changes were detected."
+    visible = ", ".join(changes[:10])
+    suffix = "..." if len(changes) > 10 else ""
+    return f"Documentation summary unavailable. Review changes in: {visible}{suffix}"
+
+
+def _has_ascii_control(value: str) -> bool:
+    return any(ord(char) < 32 or ord(char) == 127 for char in value)
+
+
+def _normalize_changed_file_path(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    candidate = value.replace("\\", "/").strip()
+    if not candidate or _has_ascii_control(candidate):
+        return None
+    path = PurePosixPath(candidate)
+    if path.is_absolute() or ".." in path.parts:
+        return None
+    return candidate
 
 
 # ---------------------------------------------------------------------------
@@ -157,18 +263,17 @@ class ProjectWiki:
         model_changes: list[str] = []
         config_changes: list[str] = []
         code_changes: list[str] = []
+        visible_changes: list[str] = []
 
-        for change in changes:
-            p = Path(change)
+        for raw_change in changes:
+            change = _normalize_changed_file_path(raw_change)
+            if change is None:
+                continue
+            visible_changes.append(change)
+            p = PurePosixPath(change)
             ext = p.suffix
             name = p.name.lower()
-            content = ""
-            full_path = root / change
-            if full_path.exists() and full_path.stat().st_size < MAX_FILE_SIZE:
-                try:
-                    content = full_path.read_text(encoding="utf-8", errors="replace")
-                except Exception:
-                    pass
+            content = _read_safe_project_text(root / change, root)
 
             if "route" in name or "router" in name or "@app." in content or "@router." in content:
                 route_changes.append(change)
@@ -178,6 +283,9 @@ class ProjectWiki:
                 config_changes.append(change)
             else:
                 code_changes.append(change)
+
+        if not visible_changes:
+            return WikiDiff(raw_diff=_build_wiki_diff_fallback([]))
 
         added: list[str] = []
         modified: list[str] = []
@@ -195,15 +303,18 @@ class ProjectWiki:
         provider, model = resolve_model("documentation")
         diff_prompt = (
             f"These files changed in the project:\n"
-            + "\n".join(f"- {c}" for c in changes[:30])
+            + "\n".join(f"- {c}" for c in visible_changes[:30])
             + "\n\nSummarize what documentation sections need updating and why."
         )
-        diff_summary = await call_model(
-            provider,
-            model,
-            [{"role": "user", "content": diff_prompt}],
-            temperature=0.3,
-            max_tokens=1024,
+        diff_summary = _wiki_text_or_fallback(
+            await call_model(
+                provider,
+                model,
+                [{"role": "user", "content": diff_prompt}],
+                temperature=0.3,
+                max_tokens=1024,
+            ),
+            _build_wiki_diff_fallback(visible_changes),
         )
 
         return WikiDiff(
@@ -289,17 +400,12 @@ class ProjectWiki:
         """Extract top-level classes, functions, and imports from Python files."""
         summaries: list[str] = []
         count = 0
-        for pyfile in root.rglob("*.py"):
+        for pyfile in _iter_safe_project_files(root, "*.py"):
             if count >= MAX_FILES_TO_PARSE:
                 break
-            if any(part in _IGNORE_DIRS for part in pyfile.parts):
-                continue
-            if pyfile.stat().st_size > MAX_FILE_SIZE:
-                continue
 
-            try:
-                content = pyfile.read_text(encoding="utf-8", errors="replace")
-            except Exception:
+            content = _read_safe_project_text(pyfile, root)
+            if not content:
                 continue
 
             rel = pyfile.relative_to(root)
@@ -327,14 +433,9 @@ class ProjectWiki:
             re.IGNORECASE | re.DOTALL,
         )
 
-        for pyfile in root.rglob("*.py"):
-            if any(part in _IGNORE_DIRS for part in pyfile.parts):
-                continue
-            if pyfile.stat().st_size > MAX_FILE_SIZE:
-                continue
-            try:
-                content = pyfile.read_text(encoding="utf-8", errors="replace")
-            except Exception:
+        for pyfile in _iter_safe_project_files(root, "*.py"):
+            content = _read_safe_project_text(pyfile, root)
+            if not content:
                 continue
 
             for match in route_pattern.finditer(content):
@@ -375,14 +476,9 @@ class ProjectWiki:
             re.DOTALL,
         )
 
-        for pyfile in root.rglob("*.py"):
-            if any(part in _IGNORE_DIRS for part in pyfile.parts):
-                continue
-            if pyfile.stat().st_size > MAX_FILE_SIZE:
-                continue
-            try:
-                content = pyfile.read_text(encoding="utf-8", errors="replace")
-            except Exception:
+        for pyfile in _iter_safe_project_files(root, "*.py"):
+            content = _read_safe_project_text(pyfile, root)
+            if not content:
                 continue
 
             for model_match in model_pattern.finditer(content):
@@ -426,25 +522,16 @@ class ProjectWiki:
 
         # Check .env.example first
         env_example = root / ".env.example"
-        if env_example.exists():
-            try:
-                for line in env_example.read_text().splitlines():
-                    line = line.strip()
-                    if line and not line.startswith("#") and "=" in line:
-                        key = line.split("=", 1)[0].strip()
-                        env_vars[key] = {"name": key, "source": ".env.example"}
-            except Exception:
-                pass
+        for line in _read_safe_project_text(env_example, root).splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key = line.split("=", 1)[0].strip()
+                env_vars[key] = {"name": key, "source": ".env.example"}
 
         # Check Settings class / config files
-        for pyfile in root.rglob("*.py"):
-            if any(part in _IGNORE_DIRS for part in pyfile.parts):
-                continue
-            if pyfile.stat().st_size > MAX_FILE_SIZE:
-                continue
-            try:
-                content = pyfile.read_text(encoding="utf-8", errors="replace")
-            except Exception:
+        for pyfile in _iter_safe_project_files(root, "*.py"):
+            content = _read_safe_project_text(pyfile, root)
+            if not content:
                 continue
 
             for match in env_pattern.finditer(content):
@@ -464,42 +551,39 @@ class ProjectWiki:
         # Python
         for req_file in ["requirements.txt", "requirements-dev.txt"]:
             path = root / req_file
-            if path.exists():
-                try:
-                    lines = [
-                        l.split("#")[0].strip()
-                        for l in path.read_text().splitlines()
-                        if l.strip() and not l.strip().startswith("#")
-                    ]
-                    deps[req_file] = lines
-                except Exception:
-                    pass
+            content = _read_safe_project_text(path, root)
+            if content:
+                lines = [
+                    l.split("#")[0].strip()
+                    for l in content.splitlines()
+                    if l.strip() and not l.strip().startswith("#")
+                ]
+                deps[req_file] = lines
 
         # pyproject.toml
         pyproject = root / "pyproject.toml"
-        if pyproject.exists():
-            try:
-                content = pyproject.read_text()
-                dep_match = re.search(
-                    r"dependencies\s*=\s*\[(.*?)\]", content, re.DOTALL
-                )
-                if dep_match:
-                    raw = dep_match.group(1)
-                    packages = re.findall(r'"([^"]+)"', raw)
-                    deps["pyproject.toml"] = packages
-            except Exception:
-                pass
+        content = _read_safe_project_text(pyproject, root)
+        if content:
+            dep_match = re.search(
+                r"dependencies\s*=\s*\[(.*?)\]", content, re.DOTALL
+            )
+            if dep_match:
+                raw = dep_match.group(1)
+                packages = re.findall(r'"([^"]+)"', raw)
+                deps["pyproject.toml"] = packages
 
         # Node.js
         package_json = root / "package.json"
-        if package_json.exists():
+        content = _read_safe_project_text(package_json, root)
+        if content:
             try:
-                data = json.loads(package_json.read_text())
-                for key in ["dependencies", "devDependencies"]:
-                    if key in data:
-                        deps[f"package.json ({key})"] = list(data[key].keys())
-            except Exception:
-                pass
+                data = json.loads(content)
+            except json.JSONDecodeError:
+                data = {}
+            for key in ["dependencies", "devDependencies"]:
+                packages = data.get(key)
+                if isinstance(packages, dict):
+                    deps[f"package.json ({key})"] = list(packages.keys())
 
         return deps
 
@@ -525,12 +609,15 @@ class ProjectWiki:
             "and technology stack. Use markdown formatting."
         )
 
-        content = await call_model(
-            provider,
-            model,
-            [{"role": "user", "content": prompt}],
-            temperature=0.4,
-            max_tokens=2048,
+        content = _wiki_text_or_fallback(
+            await call_model(
+                provider,
+                model,
+                [{"role": "user", "content": prompt}],
+                temperature=0.4,
+                max_tokens=2048,
+            ),
+            _build_architecture_fallback(project_name, file_tree, code_summary),
         )
 
         return WikiSection(title="Architecture Overview", content=content)

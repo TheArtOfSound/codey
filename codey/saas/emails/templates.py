@@ -1,5 +1,15 @@
 from __future__ import annotations
 
+from html import escape
+
+
+def _html_text(value: object) -> str:
+    return escape(str(value), quote=False)
+
+
+def _html_attr(value: object) -> str:
+    return escape(str(value), quote=True)
+
 
 def _wrap(body_html: str) -> str:
     """Wrap body content in the standard Codey email shell."""
@@ -38,7 +48,7 @@ You're receiving this because you have a Codey account.<br/>
 
 
 def _heading(text: str) -> str:
-    return f'<h1 style="margin:0 0 16px;font-size:22px;font-weight:700;color:#1a1a2e;">{text}</h1>'
+    return f'<h1 style="margin:0 0 16px;font-size:22px;font-weight:700;color:#1a1a2e;">{_html_text(text)}</h1>'
 
 
 def _paragraph(text: str) -> str:
@@ -49,9 +59,9 @@ def _button(url: str, label: str) -> str:
     return (
         f'<table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0;">'
         f'<tr><td style="border-radius:8px;background-color:#00ff88;" align="center">'
-        f'<a href="{url}" target="_blank" '
+        f'<a href="{_html_attr(url)}" target="_blank" '
         f'style="display:inline-block;padding:14px 32px;font-size:15px;font-weight:600;'
-        f'color:#1a1a2e;text-decoration:none;border-radius:8px;">{label}</a>'
+        f'color:#1a1a2e;text-decoration:none;border-radius:8px;">{_html_text(label)}</a>'
         f'</td></tr></table>'
     )
 
@@ -59,8 +69,8 @@ def _button(url: str, label: str) -> str:
 def _stat_row(label: str, value: str) -> str:
     return (
         f'<tr>'
-        f'<td style="padding:8px 0;font-size:14px;color:#888;border-bottom:1px solid #f0f0f0;">{label}</td>'
-        f'<td style="padding:8px 0;font-size:14px;font-weight:600;color:#1a1a2e;text-align:right;border-bottom:1px solid #f0f0f0;">{value}</td>'
+        f'<td style="padding:8px 0;font-size:14px;color:#888;border-bottom:1px solid #f0f0f0;">{_html_text(label)}</td>'
+        f'<td style="padding:8px 0;font-size:14px;font-weight:600;color:#1a1a2e;text-align:right;border-bottom:1px solid #f0f0f0;">{_html_text(value)}</td>'
         f'</tr>'
     )
 
@@ -198,8 +208,9 @@ def autonomous_summary(
 
     rows = ""
     for action in actions:
-        desc = action.get("description", "Improvement")
-        repo = action.get("repo", "")
+        desc = _html_text(action.get("description") or "Improvement")
+        repo_value = action.get("repo", "")
+        repo = _html_text(repo_value) if repo_value else ""
         badge = (
             f'<span style="display:inline-block;background:#f0f0f0;border-radius:4px;'
             f'padding:2px 8px;font-size:12px;color:#666;margin-right:6px;">{repo}</span>'
@@ -228,7 +239,7 @@ def autonomous_summary(
 
 def session_complete(*, session_summary: dict, dashboard_url: str) -> tuple[str, str]:
     subject = "Your Codey session is complete."
-    description = session_summary.get("description", "Session completed")
+    description = _html_text(session_summary.get("description", "Session completed"))
     lines = session_summary.get("lines_generated", 0)
     files_changed = session_summary.get("files_changed", 0)
     credits_charged = session_summary.get("credits_charged", 0)
@@ -258,7 +269,7 @@ def subscription_cancelled(
         _heading("Subscription cancelled")
         + _paragraph(
             f"Your Codey subscription has been cancelled. "
-            f"You'll continue to have full access until <strong>{end_date}</strong>."
+            f"You'll continue to have full access until <strong>{_html_text(end_date)}</strong>."
         )
         + _paragraph("If you change your mind, you can resubscribe at any time.")
         + _button(resubscribe_url, "Resubscribe")

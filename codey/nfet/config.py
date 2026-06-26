@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import logging
+import math
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -16,6 +18,41 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _CONFIG_FILENAME = "codey.config.json"
+_MAX_CONFIG_CHARS = 1_000_000
+_CONFIG_URL_CREDENTIAL_RE = re.compile(
+    r"([A-Za-z][A-Za-z0-9+.-]*://)[^/@\s]+(?::[^/@\s]*)?@"
+)
+_CONFIG_URL_QUERY_SECRET_RE = re.compile(
+    r"(?i)([?&#](?:api[_-]?key|access[_-]?token|auth[_-]?token|"
+    r"refresh[_-]?token|client[_-]?secret|password|secret|token)=)[^&#\s]+"
+)
+_CONFIG_NAMED_SECRET_RE = re.compile(
+    r"(?i)(\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|"
+    r"refresh[_-]?token|client[_-]?secret|password|secret|token|authorization)"
+    r"\b\s*[:=]\s*(?:Bearer\s+)?[\"']?)[^\"'\s,}&]+"
+)
+_CONFIG_EMAIL_ADDRESS_RE = re.compile(
+    r"\b[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b"
+)
+
+
+def _redact_config_error(value: object) -> str:
+    text = str(value)
+    text = _CONFIG_URL_CREDENTIAL_RE.sub(r"\1***@", text)
+    text = _CONFIG_URL_QUERY_SECRET_RE.sub(r"\1***", text)
+    text = _CONFIG_NAMED_SECRET_RE.sub(r"\1***", text)
+    return _CONFIG_EMAIL_ADDRESS_RE.sub(r"***@\1", text)
+
+
+def _read_config_text(config_path: Path) -> str:
+    try:
+        with config_path.open("r", encoding="utf-8", errors="replace") as handle:
+            content = handle.read(_MAX_CONFIG_CHARS + 1)
+    except AttributeError:
+        content = config_path.read_text(encoding="utf-8")
+    if len(content) > _MAX_CONFIG_CHARS:
+        raise ValueError("config file is too large")
+    return content
 
 
 @dataclass
@@ -73,9 +110,16 @@ def load_config(project_root: str | Path | None = None) -> NFETConfig:
         return NFETConfig()
 
     try:
-        raw = json.loads(config_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("Failed to parse %s: %s — using defaults", config_path, exc)
+        raw = json.loads(_read_config_text(config_path))
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError, ValueError) as exc:
+        logger.warning(
+            "Failed to parse %s: %s — using defaults",
+            _redact_config_error(config_path),
+            _redact_config_error(exc),
+        )
+        return NFETConfig()
+    if not isinstance(raw, dict):
+        logger.warning("Config root in %s is not an object — using defaults", config_path)
         return NFETConfig()
 
     nfet_section = raw.get("nfet", raw)
@@ -102,36 +146,49 @@ def validate_config(config: NFETConfig) -> list[str]:
     """Validate a config and return a list of error strings (empty if valid)."""
     errors: list[str] = []
 
-    if config.alpha <= 0:
+    if not _is_finite_number(config.alpha) or config.alpha <= 0:
         errors.append(f"alpha must be positive, got {config.alpha}")
-    if config.beta <= 0:
+    if not _is_finite_number(config.beta) or config.beta <= 0:
         errors.append(f"beta must be positive, got {config.beta}")
-    if not 0 <= config.sigma_star <= 1:
+    if not _is_finite_number(config.sigma_star) or not 0 <= config.sigma_star <= 1:
         errors.append(f"sigma_star must be in [0, 1], got {config.sigma_star}")
-    if not 0 <= config.kappa_star <= 1:
+    if not _is_finite_number(config.kappa_star) or not 0 <= config.kappa_star <= 1:
         errors.append(f"kappa_star must be in [0, 1], got {config.kappa_star}")
-    if config.kappa_max <= 0:
+    if not _is_finite_number(config.kappa_max) or config.kappa_max <= 0:
         errors.append(f"kappa_max must be positive, got {config.kappa_max}")
-    if not 0 < config.ridge_threshold <= 1:
+    if (
+        not _is_finite_number(config.ridge_threshold)
+        or not 0 < config.ridge_threshold <= 1
+    ):
         errors.append(f"ridge_threshold must be in (0, 1], got {config.ridge_threshold}")
-    if not 0 < config.caution_threshold < config.ridge_threshold:
+    if (
+        not _is_finite_number(config.caution_threshold)
+        or not _is_finite_number(config.ridge_threshold)
+        or not 0 < config.caution_threshold < config.ridge_threshold
+    ):
         errors.append(
             f"caution_threshold must be in (0, ridge_threshold), "
             f"got {config.caution_threshold}"
         )
-    if config.stress_scale <= 0:
+    if not _is_finite_number(config.stress_scale) or config.stress_scale <= 0:
         errors.append(f"stress_scale must be positive, got {config.stress_scale}")
-    if config.auto_sweep_interval_minutes < 1:
+    if (
+        not _is_finite_number(config.auto_sweep_interval_minutes)
+        or config.auto_sweep_interval_minutes < 1
+    ):
         errors.append(
             f"auto_sweep_interval_minutes must be >= 1, "
             f"got {config.auto_sweep_interval_minutes}"
         )
-    if config.history_retention_days < 1:
+    if (
+        not _is_finite_number(config.history_retention_days)
+        or config.history_retention_days < 1
+    ):
         errors.append(
             f"history_retention_days must be >= 1, "
             f"got {config.history_retention_days}"
         )
-    if config.sweep_credit_cost < 0:
+    if not _is_finite_number(config.sweep_credit_cost) or config.sweep_credit_cost < 0:
         errors.append(f"sweep_credit_cost must be >= 0, got {config.sweep_credit_cost}")
 
     return errors
@@ -140,6 +197,13 @@ def validate_config(config: NFETConfig) -> list[str]:
 # ---------------------------------------------------------------------------
 # Internals
 # ---------------------------------------------------------------------------
+
+
+def _is_finite_number(value: Any) -> bool:
+    try:
+        return math.isfinite(float(value))
+    except (OverflowError, TypeError, ValueError):
+        return False
 
 
 def _find_config(project_root: str | Path | None) -> Path | None:
@@ -167,9 +231,30 @@ def _apply_overrides(config: NFETConfig, overrides: dict[str, Any]) -> None:
         if key in field_names:
             expected_type = type(getattr(config, key))
             try:
-                coerced = expected_type(value)
+                if expected_type is bool:
+                    if isinstance(value, bool):
+                        coerced = value
+                    elif isinstance(value, str):
+                        normalized = value.strip().lower()
+                        if normalized in {"true", "1", "yes", "on"}:
+                            coerced = True
+                        elif normalized in {"false", "0", "no", "off", ""}:
+                            coerced = False
+                        else:
+                            raise ValueError(value)
+                    elif isinstance(value, (int, float)) and not isinstance(value, bool):
+                        if not math.isfinite(float(value)):
+                            raise ValueError(value)
+                        coerced = bool(value)
+                    else:
+                        raise ValueError(value)
+                else:
+                    coerced = expected_type(value)
+                    if isinstance(coerced, (int, float)) and not isinstance(coerced, bool):
+                        if not math.isfinite(float(coerced)):
+                            raise ValueError(value)
                 setattr(config, key, coerced)
-            except (TypeError, ValueError):
+            except (OverflowError, TypeError, ValueError):
                 logger.warning(
                     "Cannot coerce config key '%s' value %r to %s — skipping",
                     key, value, expected_type.__name__,
@@ -183,7 +268,7 @@ def _clamp_config(config: NFETConfig) -> None:
     config.sigma_star = max(0.0, min(1.0, config.sigma_star))
     config.kappa_star = max(0.0, min(1.0, config.kappa_star))
     config.kappa_max = max(0.01, config.kappa_max)
-    config.ridge_threshold = max(0.01, min(1.0, config.ridge_threshold))
+    config.ridge_threshold = max(0.02, min(1.0, config.ridge_threshold))
     config.caution_threshold = max(0.01, min(config.ridge_threshold - 0.01, config.caution_threshold))
     config.stress_scale = max(0.01, config.stress_scale)
     config.auto_sweep_interval_minutes = max(1, config.auto_sweep_interval_minutes)

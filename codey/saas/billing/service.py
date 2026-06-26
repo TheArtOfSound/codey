@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -9,12 +10,78 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from codey.saas.billing.plans import PLANS, TOPUP_PACKAGES
+from codey.saas.billing.stripe_setup import ensure_stripe_catalog_loaded
 from codey.saas.config import settings
 from codey.saas.models import User
+from codey.saas.referrals import convert_pending_referral
 
 logger = logging.getLogger(__name__)
 
-stripe.api_key = settings.stripe_secret_key
+
+def _has_ascii_control(value: str) -> bool:
+    return any(ord(char) < 32 or ord(char) == 127 for char in value)
+
+
+def _has_whitespace(value: str) -> bool:
+    return any(char.isspace() for char in value)
+
+
+def _coerce_non_empty_billing_text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if _has_ascii_control(normalized) or _has_whitespace(normalized):
+        return None
+    return normalized or None
+
+
+stripe.api_key = _coerce_non_empty_billing_text(settings.stripe_secret_key) or ""
+
+
+def _stripe_metadata_lookup(metadata: object, key: str) -> str | None:
+    value: object | None
+    if metadata is None:
+        return None
+    if isinstance(metadata, dict):
+        value = metadata.get(key)
+    elif hasattr(metadata, "to_dict_recursive"):
+        try:
+            payload = metadata.to_dict_recursive()
+        except Exception:
+            return None
+        value = payload.get(key) if isinstance(payload, dict) else None
+    elif hasattr(metadata, "to_dict"):
+        try:
+            payload = metadata.to_dict()
+        except Exception:
+            return None
+        value = payload.get(key) if isinstance(payload, dict) else None
+    else:
+        try:
+            value = metadata[key]  # type: ignore[index]
+        except Exception:
+            value = getattr(metadata, key, None)
+    return _coerce_non_empty_billing_text(value)
+
+
+def _stripe_timestamp_to_datetime(value: object) -> datetime | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        timestamp = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(timestamp):
+        return None
+    try:
+        return datetime.fromtimestamp(timestamp, tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def _serialize_stripe_timestamp(value: object) -> str:
+    parsed = _stripe_timestamp_to_datetime(value)
+    return parsed.isoformat() if parsed is not None else ""
 
 
 class BillingError(Exception):
@@ -45,11 +112,25 @@ class BillingService:
         return user
 
     def _require_customer(self, user: User) -> str:
-        if not user.stripe_customer_id:
+        customer_id = _coerce_non_empty_billing_text(getattr(user, "stripe_customer_id", None))
+        if not customer_id:
             raise BillingError(
                 f"User {user.id} has no Stripe customer — create one first"
             )
-        return user.stripe_customer_id
+        return customer_id
+
+    async def _ensure_customer(self, user: User) -> str:
+        """Return the user's Stripe customer id, creating one if absent."""
+        existing = _coerce_non_empty_billing_text(getattr(user, "stripe_customer_id", None))
+        if existing:
+            return existing
+        customer = stripe.Customer.create(
+            email=_coerce_non_empty_billing_text(getattr(user, "email", None)),
+            metadata={"user_id": str(getattr(user, "id", ""))},
+        )
+        user.stripe_customer_id = customer.id
+        await self.db.flush()
+        return customer.id
 
     @staticmethod
     def _has_payment_method(customer_id: str) -> bool:
@@ -74,7 +155,8 @@ class BillingService:
         if plan not in PLANS or plan == "free":
             raise BillingError(f"Invalid paid plan: {plan}")
 
-        price_id = PLANS[plan].get("stripe_price_id")
+        await ensure_stripe_catalog_loaded()
+        price_id = _coerce_non_empty_billing_text(PLANS[plan].get("stripe_price_id"))
         if not price_id:
             raise BillingError(
                 f"Stripe price not configured for plan '{plan}' — "
@@ -146,7 +228,7 @@ class BillingService:
                 f"(status={sub.status})"
             )
 
-        plan = sub.metadata.get("codey_plan")
+        plan = _stripe_metadata_lookup(getattr(sub, "metadata", None), "codey_plan")
         if not plan or plan not in PLANS:
             raise BillingError(
                 f"Subscription {subscription_id} missing codey_plan metadata"
@@ -169,15 +251,18 @@ class BillingService:
         user.plan = plan
         user.plan_status = "active"
         user.subscription_id = subscription_id
+        user.subscription_period_end = None
         user.credits_remaining = PLANS[plan]["credits"]
         user.credits_used_this_month = 0
+        await convert_pending_referral(self.db, referred_id=user.id)
 
     async def change_plan(self, user_id: UUID, new_plan: str) -> dict:
         """Upgrade or downgrade an existing subscription with proration."""
         if new_plan not in PLANS or new_plan == "free":
             raise BillingError(f"Invalid target plan: {new_plan}")
 
-        price_id = PLANS[new_plan].get("stripe_price_id")
+        await ensure_stripe_catalog_loaded()
+        price_id = _coerce_non_empty_billing_text(PLANS[new_plan].get("stripe_price_id"))
         if not price_id:
             raise BillingError(f"Stripe price not configured for '{new_plan}'")
 
@@ -200,25 +285,32 @@ class BillingService:
                     "price": price_id,
                 }
             ],
+            cancel_at_period_end=False,
             proration_behavior="create_prorations",
             metadata={"codey_plan": new_plan},
         )
 
-        old_plan = user.plan
+        old_plan = user.plan if isinstance(user.plan, str) else None
+        if old_plan is not None:
+            old_plan = old_plan.strip().lower() or None
+        current_credits = User._coerce_credit_value(user.credits_remaining)
         user.plan = new_plan
         user.plan_status = "active"
+        user.subscription_period_end = None
 
         # Credit adjustment on upgrade: give the difference immediately
-        old_credits = PLANS.get(old_plan, {}).get("credits", 0)
         new_credits = PLANS[new_plan]["credits"]
-        if new_credits > old_credits:
-            bonus = new_credits - old_credits
-            user.credits_remaining += bonus
+        bonus = 0
+        if old_plan in PLANS:
+            old_credits = PLANS[old_plan]["credits"]
+            if new_credits > old_credits:
+                bonus = new_credits - old_credits
+        user.credits_remaining = current_credits + bonus
 
         await self.db.flush()
 
         return {
-            "old_plan": old_plan,
+            "old_plan": old_plan or "",
             "new_plan": new_plan,
             "credits": user.credits_remaining,
             "subscription_id": user.subscription_id,
@@ -236,15 +328,13 @@ class BillingService:
 
         user.plan_status = "cancelling"
 
-        period_end = datetime.fromtimestamp(
-            sub.current_period_end, tz=timezone.utc
-        )
+        period_end = _stripe_timestamp_to_datetime(sub.current_period_end)
         user.subscription_period_end = period_end
         await self.db.flush()
 
         return {
             "status": "cancelling",
-            "access_until": period_end.isoformat(),
+            "access_until": period_end.isoformat() if period_end is not None else "",
             "subscription_id": user.subscription_id,
         }
 
@@ -262,9 +352,10 @@ class BillingService:
         if package_key not in TOPUP_PACKAGES:
             raise BillingError(f"Unknown top-up package: {package_key}")
 
+        await ensure_stripe_catalog_loaded()
         pkg = TOPUP_PACKAGES[package_key]
         user = await self._get_user(user_id)
-        customer_id = self._require_customer(user)
+        customer_id = await self._ensure_customer(user)
 
         payment_intent = stripe.PaymentIntent.create(
             amount=pkg["price"],
@@ -289,6 +380,15 @@ class BillingService:
         """List saved cards for the customer."""
         user = await self._get_user(user_id)
         customer_id = self._require_customer(user)
+        customer = stripe.Customer.retrieve(customer_id)
+        invoice_settings = getattr(customer, "invoice_settings", None)
+        default_payment_method = (
+            getattr(invoice_settings, "default_payment_method", None)
+            if invoice_settings is not None
+            else None
+        )
+        if isinstance(default_payment_method, dict):
+            default_payment_method = default_payment_method.get("id")
 
         methods = stripe.PaymentMethod.list(
             customer=customer_id, type="card", limit=20
@@ -300,6 +400,7 @@ class BillingService:
                 "last4": pm.card.last4,
                 "exp_month": pm.card.exp_month,
                 "exp_year": pm.card.exp_year,
+                "is_default": pm.id == default_payment_method,
             }
             for pm in methods.data
         ]
@@ -351,17 +452,11 @@ class BillingService:
                 "amount_due": inv.amount_due,
                 "amount_paid": inv.amount_paid,
                 "currency": inv.currency,
-                "period_start": datetime.fromtimestamp(
-                    inv.period_start, tz=timezone.utc
-                ).isoformat(),
-                "period_end": datetime.fromtimestamp(
-                    inv.period_end, tz=timezone.utc
-                ).isoformat(),
+                "period_start": _serialize_stripe_timestamp(inv.period_start),
+                "period_end": _serialize_stripe_timestamp(inv.period_end),
                 "hosted_invoice_url": inv.hosted_invoice_url,
                 "pdf": inv.invoice_pdf,
-                "created": datetime.fromtimestamp(
-                    inv.created, tz=timezone.utc
-                ).isoformat(),
+                "created": _serialize_stripe_timestamp(inv.created),
             }
             for inv in invoices.data
         ]

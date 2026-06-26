@@ -2,6 +2,8 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { api, type Repo } from "@/lib/api";
+import { useToast } from "@/components/ui/ToastProvider";
+import { repoWorkLanes } from "@/lib/repo-work";
 import {
   Bot,
   PauseCircle,
@@ -137,6 +139,8 @@ export default function AutonomousPage() {
   const [loading, setLoading] = useState(true);
   const [allPaused, setAllPaused] = useState(false);
   const [creditsUsedThisMonth, setCreditsUsedThisMonth] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const { addToast } = useToast();
 
   useEffect(() => {
     async function load() {
@@ -144,68 +148,65 @@ export default function AutonomousPage() {
         const repoData = await api.getRepos();
         setRepos(repoData);
 
-        // Initialize configs with defaults
         const defaultConfigs: Record<string, RepoConfig> = {};
         repoData.forEach((repo) => {
+          const rawConfig = (repo.autonomous_config || {}) as Record<string, unknown>;
+          const allowedActions = (rawConfig.allowed_actions || {}) as Record<string, boolean>;
           defaultConfigs[repo.id] = {
-            stressThreshold: 0.6,
-            maxImpactRadius: 15,
+            stressThreshold: typeof rawConfig.stress_threshold === "number" ? rawConfig.stress_threshold : 0.6,
+            maxImpactRadius: typeof rawConfig.max_impact_radius === "number" ? rawConfig.max_impact_radius : 15,
             allowedActions: {
-              refactor: true,
-              fixBugs: true,
-              optimizePerf: false,
-              updateDeps: false,
+              refactor: allowedActions.refactor ?? true,
+              fixBugs: allowedActions.fix_bugs ?? true,
+              optimizePerf: allowedActions.optimize_perf ?? false,
+              updateDeps: allowedActions.update_deps ?? false,
             },
-            autonomous: false,
+            autonomous: repo.autonomous_mode_enabled ?? false,
           };
         });
         setConfigs(defaultConfigs);
+        setAllPaused(repoData.every((repo) => !(repo.autonomous_mode_enabled ?? false)));
 
-        // Mock activity data
-        setActivities([
-          {
-            id: "1",
-            repoId: repoData[0]?.id || "",
-            repoName: repoData[0]?.name || "example-repo",
-            timestamp: new Date(Date.now() - 3600000).toISOString(),
-            trigger: "Stress threshold exceeded (0.82)",
-            component: "AuthService",
-            stressBefore: 0.82,
-            stressAfter: 0.54,
-            rolledBack: false,
-            creditsUsed: 5,
-            description: "Extracted shared authentication logic into middleware",
-          },
-          {
-            id: "2",
-            repoId: repoData[0]?.id || "",
-            repoName: repoData[0]?.name || "example-repo",
-            timestamp: new Date(Date.now() - 7200000).toISOString(),
-            trigger: "Stress threshold exceeded (0.76)",
-            component: "PaymentProcessor",
-            stressBefore: 0.76,
-            stressAfter: 0.78,
-            rolledBack: true,
-            creditsUsed: 3,
-            description: "Attempted to split processPayment into smaller functions — rolled back due to regression",
-          },
-          {
-            id: "3",
-            repoId: repoData[0]?.id || "",
-            repoName: repoData[0]?.name || "example-repo",
-            timestamp: new Date(Date.now() - 86400000).toISOString(),
-            trigger: "Scheduled scan",
-            component: "DatabaseAdapter",
-            stressBefore: 0.71,
-            stressAfter: 0.48,
-            rolledBack: false,
-            creditsUsed: 4,
-            description: "Added connection pooling configuration",
-          },
-        ]);
-        setCreditsUsedThisMonth(47);
+        const activityLists = await Promise.all(
+          repoData.map(async (repo) => {
+            try {
+              const response = await api.get<{
+                repo_id: string;
+                entries: Array<{
+                  action: string;
+                  timestamp: string;
+                  details?: Record<string, unknown> | null;
+                }>;
+              }>(`/repos/${repo.id}/activity`);
+              return response.entries.map((entry, index) => {
+                const details = entry.details || {};
+                return {
+                  id: `${repo.id}-${index}-${entry.timestamp}`,
+                  repoId: repo.id,
+                  repoName: repo.name,
+                  timestamp: entry.timestamp,
+                  trigger: String(details.trigger || entry.action),
+                  component: String(details.component || details.target || repo.name),
+                  stressBefore: Number(details.stress_before ?? details.before ?? 0),
+                  stressAfter: Number(details.stress_after ?? details.after ?? 0),
+                  rolledBack: Boolean(details.rolled_back ?? false),
+                  creditsUsed: Number(details.credits_used ?? 0),
+                  description: String(details.description || entry.action),
+                } satisfies ActivityEntry;
+              });
+            } catch {
+              return [];
+            }
+          })
+        );
+        const flattenedActivities = activityLists.flat().sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+        setActivities(flattenedActivities);
+        setCreditsUsedThisMonth(
+          flattenedActivities.reduce((total, entry) => total + entry.creditsUsed, 0)
+        );
       } catch (err) {
         console.error("Failed to load autonomous data:", err);
+        setError("Failed to load autonomous mode data.");
       } finally {
         setLoading(false);
       }
@@ -213,39 +214,79 @@ export default function AutonomousPage() {
     load();
   }, []);
 
+  async function saveConfig(repoId: string, nextConfig: RepoConfig) {
+    const prevConfig = configs[repoId];
+    setConfigs((prev) => ({ ...prev, [repoId]: nextConfig }));
+    try {
+      await api.patch(`/repos/${repoId}/autonomous`, {
+        enabled: nextConfig.autonomous,
+        config: {
+          stress_threshold: nextConfig.stressThreshold,
+          max_impact_radius: nextConfig.maxImpactRadius,
+          allowed_actions: {
+            refactor: nextConfig.allowedActions.refactor,
+            fix_bugs: nextConfig.allowedActions.fixBugs,
+            optimize_perf: nextConfig.allowedActions.optimizePerf,
+            update_deps: nextConfig.allowedActions.updateDeps,
+          },
+        },
+      });
+      addToast(
+        nextConfig.autonomous ? "Autopilot enabled for this repo" : "Autopilot paused for this repo",
+        "success",
+      );
+    } catch (err) {
+      console.error("Failed to save autonomous config:", err);
+      // Roll back the optimistic change so the toggle reflects reality
+      // (otherwise it reads "on" while autopilot is actually off).
+      if (prevConfig) {
+        setConfigs((prev) => ({ ...prev, [repoId]: prevConfig }));
+      }
+      addToast(
+        (err as { detail?: string })?.detail || "Failed to save autopilot configuration",
+        "error",
+      );
+    }
+  }
+
   function updateConfig(repoId: string, update: Partial<RepoConfig>) {
-    setConfigs((prev) => ({
-      ...prev,
-      [repoId]: { ...prev[repoId], ...update },
-    }));
+    const current = configs[repoId];
+    if (!current) return;
+    const nextConfig = { ...current, ...update };
+    void saveConfig(repoId, nextConfig);
   }
 
   function toggleAction(repoId: string, action: keyof RepoConfig["allowedActions"]) {
-    setConfigs((prev) => ({
-      ...prev,
-      [repoId]: {
-        ...prev[repoId],
-        allowedActions: {
-          ...prev[repoId].allowedActions,
-          [action]: !prev[repoId].allowedActions[action],
-        },
+    const current = configs[repoId];
+    if (!current) return;
+    const nextConfig = {
+      ...current,
+      allowedActions: {
+        ...current.allowedActions,
+        [action]: !current.allowedActions[action],
       },
-    }));
+    };
+    void saveConfig(repoId, nextConfig);
   }
 
   function handlePauseAll() {
     setAllPaused(true);
-    setConfigs((prev) => {
-      const updated = { ...prev };
-      Object.keys(updated).forEach((key) => {
-        updated[key] = { ...updated[key], autonomous: false };
-      });
-      return updated;
+    repos.forEach((repo) => {
+      const config = configs[repo.id];
+      if (config) {
+        void saveConfig(repo.id, { ...config, autonomous: false });
+      }
     });
   }
 
   function handleResumeAll() {
     setAllPaused(false);
+    repos.forEach((repo) => {
+      const config = configs[repo.id];
+      if (config) {
+        void saveConfig(repo.id, { ...config, autonomous: true });
+      }
+    });
   }
 
   if (loading) {
@@ -256,14 +297,23 @@ export default function AutonomousPage() {
     );
   }
 
+  if (error) {
+    return (
+      <div className="mx-auto max-w-4xl rounded-xl border border-codey-red/30 bg-codey-card p-6">
+        <h1 className="text-2xl font-bold text-codey-text">Autopilot</h1>
+        <p className="mt-2 text-sm text-codey-red">{error}</p>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       {/* ── Header ─────────────────────────────────────────────────── */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-codey-text">Autonomous Mode</h1>
+          <h1 className="text-2xl font-bold text-codey-text">Autopilot</h1>
           <p className="mt-1 text-sm text-codey-text-dim">
-            Configure auto-fix agents that monitor your repos and reduce structural stress.
+            Set the rules for how Codey watches repositories, queues work, and applies low-risk maintenance automatically. Manual operator runs still cover the rest of the repo-work stack.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -294,15 +344,61 @@ export default function AutonomousPage() {
         </div>
       </div>
 
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="rounded-xl border border-codey-border bg-codey-card">
+          <div className="border-b border-codey-border px-5 py-4">
+            <h2 className="text-sm font-semibold text-codey-text">Autopilot-Ready Lanes</h2>
+            <p className="mt-1 text-xs text-codey-text-dim">
+              These lanes can stay watched continuously or run automatically within repo policies.
+            </p>
+          </div>
+          <div className="divide-y divide-codey-border/50">
+            {repoWorkLanes.filter((lane) => lane.autopilotReady).map((lane) => (
+              <div key={lane.id} className="px-5 py-4">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-medium text-codey-text">{lane.label}</p>
+                  <span className="rounded-full border border-codey-border bg-codey-bg px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-codey-text-muted">
+                    {lane.modeLabel}
+                  </span>
+                </div>
+                <p className="mt-2 text-sm leading-6 text-codey-text-dim">{lane.summary}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-codey-border bg-codey-card">
+          <div className="border-b border-codey-border px-5 py-4">
+            <h2 className="text-sm font-semibold text-codey-text">Manual Operator Lanes</h2>
+            <p className="mt-1 text-xs text-codey-text-dim">
+              These paths are queued on demand so Codey can work deeper before you ship.
+            </p>
+          </div>
+          <div className="divide-y divide-codey-border/50">
+            {repoWorkLanes.filter((lane) => !lane.autopilotReady).map((lane) => (
+              <div key={lane.id} className="px-5 py-4">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-medium text-codey-text">{lane.label}</p>
+                  <span className="rounded-full border border-codey-border bg-codey-bg px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-codey-text-muted">
+                    {lane.modeLabel}
+                  </span>
+                </div>
+                <p className="mt-2 text-sm leading-6 text-codey-text-dim">{lane.summary}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
       {/* ── Repo List with Toggles ─────────────────────────────────── */}
       <div className="rounded-xl border border-codey-border bg-codey-card">
         <div className="border-b border-codey-border px-5 py-4">
-          <h2 className="text-sm font-semibold text-codey-text">Connected Repositories</h2>
+          <h2 className="text-sm font-semibold text-codey-text">Managed Repositories</h2>
         </div>
 
         {repos.length === 0 ? (
           <div className="px-5 py-12 text-center text-sm text-codey-text-dim">
-            No repos connected. Connect a GitHub repository from the dashboard to enable autonomous mode.
+            No repositories are managed yet. Connect a GitHub repository from the control room to enable autopilot.
           </div>
         ) : (
           <div className="divide-y divide-codey-border/50">
@@ -372,7 +468,7 @@ export default function AutonomousPage() {
                             displayValue={config.stressThreshold.toFixed(2)}
                           />
                           <Slider
-                            label="Max impact radius"
+                            label="Max blast radius"
                             value={config.maxImpactRadius}
                             min={5}
                             max={50}
@@ -387,15 +483,15 @@ export default function AutonomousPage() {
                         {/* Allowed actions */}
                         <div>
                           <p className="text-xs font-medium text-codey-text-dim mb-3">
-                            Allowed Actions
+                            Allowed actions
                           </p>
                           <div className="space-y-3">
                             {(
                               [
-                                { key: "refactor" as const, label: "Refactor code" },
-                                { key: "fixBugs" as const, label: "Fix bugs" },
-                                { key: "optimizePerf" as const, label: "Optimize performance" },
-                                { key: "updateDeps" as const, label: "Update dependencies" },
+                                { key: "refactor" as const, label: "Structural refactors" },
+                                { key: "fixBugs" as const, label: "Bug repair" },
+                                { key: "optimizePerf" as const, label: "Performance tuning" },
+                                { key: "updateDeps" as const, label: "Dependency maintenance" },
                               ] as const
                             ).map((action) => (
                               <label
@@ -430,12 +526,12 @@ export default function AutonomousPage() {
       {/* ── Activity Log ───────────────────────────────────────────── */}
       <div className="rounded-xl border border-codey-border bg-codey-card">
         <div className="border-b border-codey-border px-5 py-4">
-          <h2 className="text-sm font-semibold text-codey-text">Activity Log</h2>
+          <h2 className="text-sm font-semibold text-codey-text">Run Log</h2>
         </div>
 
         {activities.length === 0 ? (
           <div className="px-5 py-12 text-center text-sm text-codey-text-dim">
-            No autonomous activity yet. Enable autonomous mode on a repo to get started.
+            No autopilot runs yet. Enable autopilot on a repository to start the maintenance queue.
           </div>
         ) : (
           <div className="overflow-x-auto">

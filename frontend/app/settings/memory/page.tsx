@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
+import { useToast } from "@/components/ui/ToastProvider";
 import {
   Brain,
   Edit3,
@@ -211,9 +212,12 @@ function MemoryItemRow({
 
 export default function MemoryViewerPage() {
   const { user } = useAuth();
+  const { addToast } = useToast();
   const [memories, setMemories] = useState<MemoryItem[]>([]);
   const [timeline, setTimeline] = useState<MemoryUpdate[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [addingTo, setAddingTo] = useState<string | null>(null);
   const [newKey, setNewKey] = useState("");
   const [newValue, setNewValue] = useState("");
@@ -232,16 +236,7 @@ export default function MemoryViewerPage() {
         setTimeline(timelineData);
       } catch (err) {
         console.error("Failed to load memory:", err);
-        // Use demo data for initial display
-        setMemories([
-          { id: "1", dimension: "language_preferences", key: "Primary Language", value: "Codey knows you prefer Python and TypeScript", updated_at: new Date().toISOString() },
-          { id: "2", dimension: "coding_style", key: "Naming Convention", value: "You use snake_case in Python and camelCase in TypeScript", updated_at: new Date().toISOString() },
-          { id: "3", dimension: "coding_style", key: "Comments", value: "You write minimal comments, preferring self-documenting code", updated_at: new Date().toISOString() },
-          { id: "4", dimension: "communication", key: "Response Style", value: "You prefer concise explanations with code examples", updated_at: new Date().toISOString() },
-          { id: "5", dimension: "project_context", key: "Active Project", value: "Working on a SaaS platform with Next.js frontend and FastAPI backend", updated_at: new Date().toISOString() },
-          { id: "6", dimension: "workflow", key: "Git Flow", value: "You use feature branches with squash merges", updated_at: new Date().toISOString() },
-          { id: "7", dimension: "personal", key: "Editor", value: "VS Code with Vim keybindings", updated_at: new Date().toISOString() },
-        ]);
+        setError("Failed to load memory.");
         setTimeline([]);
       } finally {
         setLoading(false);
@@ -255,39 +250,39 @@ export default function MemoryViewerPage() {
   }
 
   async function handleEditMemory(id: string, value: string) {
+    setActionError(null);
     try {
       await api.patch(`/memory/${id}`, { value });
+      // Only apply the change after the server confirms it.
       setMemories((prev) =>
         prev.map((m) =>
           m.id === id ? { ...m, value, updated_at: new Date().toISOString() } : m
         )
       );
-    } catch {
-      // Optimistic update fallback
-      setMemories((prev) =>
-        prev.map((m) =>
-          m.id === id ? { ...m, value, updated_at: new Date().toISOString() } : m
-        )
-      );
+    } catch (err) {
+      // Do NOT mutate state on failure — leave the existing value intact.
+      const msg = (err as { detail?: string })?.detail || "Failed to update memory.";
+      setActionError(msg);
+      addToast(msg, "error");
     }
   }
 
   async function handleDeleteMemory(id: string) {
+    setActionError(null);
     try {
       await api.delete(`/memory/${id}`);
-    } catch {}
-    setMemories((prev) => prev.filter((m) => m.id !== id));
+      // Only remove from the list once the server confirms deletion.
+      setMemories((prev) => prev.filter((m) => m.id !== id));
+    } catch (err) {
+      const msg = (err as { detail?: string })?.detail || "Failed to delete memory.";
+      setActionError(msg);
+      addToast(msg, "error");
+    }
   }
 
   async function handleAddMemory(dimension: string) {
     if (!newKey.trim() || !newValue.trim()) return;
-    const newItem: MemoryItem = {
-      id: Math.random().toString(36).slice(2),
-      dimension,
-      key: newKey.trim(),
-      value: newValue.trim(),
-      updated_at: new Date().toISOString(),
-    };
+    setActionError(null);
 
     try {
       const created = await api.post<MemoryItem>("/memory", {
@@ -295,14 +290,17 @@ export default function MemoryViewerPage() {
         key: newKey.trim(),
         value: newValue.trim(),
       });
+      // Only append the item the server actually persisted.
       setMemories((prev) => [...prev, created]);
-    } catch {
-      setMemories((prev) => [...prev, newItem]);
+      setNewKey("");
+      setNewValue("");
+      setAddingTo(null);
+    } catch (err) {
+      // Do NOT add the item on failure — keep the form open so the user can retry.
+      const msg = (err as { detail?: string })?.detail || "Failed to add memory.";
+      setActionError(msg);
+      addToast(msg, "error");
     }
-
-    setNewKey("");
-    setNewValue("");
-    setAddingTo(null);
   }
 
   function handleExportJSON() {
@@ -326,13 +324,19 @@ export default function MemoryViewerPage() {
   async function handleResetMemory() {
     if (resetInput !== "RESET MEMORY") return;
     setResetting(true);
+    setActionError(null);
     try {
       await api.delete("/memory/all");
-    } catch {}
-    setMemories([]);
-    setTimeline([]);
-    setResetInput("");
-    setShowReset(false);
+      setMemories([]);
+      setTimeline([]);
+      setResetInput("");
+      setShowReset(false);
+      addToast("Memory reset", "success");
+    } catch (err) {
+      const msg = (err as { detail?: string })?.detail || "Failed to reset memory.";
+      setActionError(msg);
+      addToast(msg, "error");
+    }
     setResetting(false);
   }
 
@@ -340,6 +344,15 @@ export default function MemoryViewerPage() {
     return (
       <div className="flex h-64 items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin text-codey-green" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="mx-auto max-w-5xl rounded-xl border border-codey-red/30 bg-codey-card p-6">
+        <h1 className="text-2xl font-bold text-codey-text">Memory</h1>
+        <p className="mt-2 text-sm text-codey-red">{error}</p>
       </div>
     );
   }
@@ -374,6 +387,23 @@ export default function MemoryViewerPage() {
           </button>
         </div>
       </div>
+
+      {/* Per-action error banner (non-fatal) */}
+      {actionError && (
+        <div className="flex items-start justify-between gap-3 rounded-xl border border-codey-red/30 bg-codey-red-glow px-4 py-3">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-codey-red" />
+            <p className="text-sm text-codey-red">{actionError}</p>
+          </div>
+          <button
+            onClick={() => setActionError(null)}
+            className="shrink-0 rounded p-0.5 text-codey-red hover:bg-codey-red/10"
+            aria-label="Dismiss"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       {/* Reset Confirmation */}
       {showReset && (

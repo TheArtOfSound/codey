@@ -3,23 +3,217 @@
 from __future__ import annotations
 
 import logging
+import math
+import re
 import threading
 import time
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from watchdog.events import FileSystemEvent, FileSystemEventHandler
-from watchdog.observers import Observer
+try:
+    from watchdog.events import FileSystemEvent, FileSystemEventHandler
+    from watchdog.observers import Observer
+except ModuleNotFoundError as exc:  # pragma: no cover - exercised via import hook
+    if exc.name != "watchdog" and not exc.name.startswith("watchdog."):
+        raise
+    _WATCHDOG_IMPORT_ERROR = exc
+
+    class FileSystemEvent:  # type: ignore[no-redef]
+        is_directory = False
+        src_path = ""
+
+    class FileSystemEventHandler:  # type: ignore[no-redef]
+        pass
+
+    class Observer:  # type: ignore[no-redef]
+        pass
+else:
+    _WATCHDOG_IMPORT_ERROR = None
 
 from codey.autonomous.audit_db import AuditDatabase
-from codey.graph.engine import CodebaseGraph
-from codey.nfet.health_db import HealthDatabase
+from codey.nfet.controller import NFETController
 from codey.nfet.sweep import NFETSweep, Phase, SweepResult
 from codey.parser.extractor import LanguageParser
 
+if TYPE_CHECKING:
+    from codey.graph.engine import CodebaseGraph
+    from codey.nfet.health_db import HealthDatabase
+
 logger = logging.getLogger(__name__)
+
+_CANDIDATE_SCORE_MIN = -100.0
+_CANDIDATE_SCORE_MAX = 100.0
+_MONITOR_STRESS_MAX = 1_000_000.0
+_URL_CREDENTIAL_RE = re.compile(
+    r"([A-Za-z][A-Za-z0-9+.-]*://)[^/@\s]+(?::[^/@\s]*)?@"
+)
+_URL_QUERY_SECRET_RE = re.compile(
+    r"(?i)([?&#](?:api[_-]?key|access[_-]?token|auth[_-]?token|"
+    r"refresh[_-]?token|client[_-]?secret|token|secret|password)=)[^&#\s]+"
+)
+_NAMED_SECRET_RE = re.compile(
+    r"(?i)(\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|"
+    r"refresh[_-]?token|client[_-]?secret|token|secret|password|authorization)"
+    r"\b\s*[:=]\s*(?:Bearer\s+)?[\"']?)[^\"'\s,}&]+"
+)
+_EMAIL_ADDRESS_RE = re.compile(
+    r"\b[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b"
+)
+
+
+def _clamp_candidate_score(value: float) -> float:
+    return max(_CANDIDATE_SCORE_MIN, min(_CANDIDATE_SCORE_MAX, value))
+
+
+def _redact_monitor_error(value: object) -> str:
+    text = str(value)
+    text = _URL_CREDENTIAL_RE.sub(r"\1***@", text)
+    text = _URL_QUERY_SECRET_RE.sub(r"\1***", text)
+    text = _NAMED_SECRET_RE.sub(r"\1***", text)
+    return _EMAIL_ADDRESS_RE.sub(r"***@\1", text)
+
+
+def _coerce_candidate_score(value: object, fallback: float = 0.0) -> float:
+    if isinstance(value, bool):
+        return fallback
+    try:
+        parsed = float(value)
+    except (OverflowError, TypeError, ValueError):
+        return fallback
+    return _clamp_candidate_score(parsed) if math.isfinite(parsed) else fallback
+
+
+def _coerce_monitor_stress(
+    value: object,
+    fallback: float = 0.0,
+    maximum: float = _MONITOR_STRESS_MAX,
+) -> float:
+    if isinstance(value, bool):
+        return fallback
+    try:
+        parsed = float(value)
+    except OverflowError:
+        try:
+            return maximum if value > 0 else fallback
+        except TypeError:
+            return maximum
+    except (TypeError, ValueError):
+        return fallback
+    if not math.isfinite(parsed):
+        return maximum if parsed > 0 else fallback
+    if parsed < 0.0:
+        return fallback
+    return min(parsed, maximum)
+
+
+def _require_watchdog() -> None:
+    if _WATCHDOG_IMPORT_ERROR is not None:
+        raise RuntimeError(
+            "watchdog is required to start autonomous file monitoring"
+        ) from _WATCHDOG_IMPORT_ERROR
+
+
+def _stop_monitor_observer_safely(observer: Observer, *, context: str) -> None:
+    for action_name in ("stop", "join"):
+        try:
+            if action_name == "stop":
+                observer.stop()
+            else:
+                observer.join(timeout=5.0)
+        except Exception as cleanup_exc:
+            logger.warning(
+                "Failed to %s monitor observer during %s: %s",
+                action_name,
+                context,
+                _redact_monitor_error(cleanup_exc),
+            )
+
+
+def _join_monitor_thread_safely(
+    thread: threading.Thread,
+    *,
+    timeout: float,
+    context: str,
+) -> None:
+    if thread is threading.current_thread():
+        return
+    try:
+        thread.join(timeout=timeout)
+    except Exception as cleanup_exc:
+        logger.warning(
+            "Failed to join monitor sweep thread during %s: %s",
+            context,
+            _redact_monitor_error(cleanup_exc),
+        )
+
+
+def _coerce_phase_constraint(value: object) -> Phase | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return Phase(value.strip().lower())
+    except ValueError:
+        return None
+
+
+def _coerce_sweep_interval(
+    value: object,
+    default: int = 60,
+    minimum: int = 1,
+    maximum: int = 86_400,
+) -> int:
+    if isinstance(value, bool):
+        return default
+    try:
+        parsed = int(value)
+    except (OverflowError, TypeError, ValueError):
+        return default
+    if parsed < minimum:
+        return default
+    return min(parsed, maximum)
+
+
+def _coerce_impact_radius(
+    value: object,
+    default: int = 15,
+    minimum: int = 1,
+    maximum: int = 10_000,
+) -> int:
+    if isinstance(value, bool):
+        return default
+    try:
+        parsed = int(value)
+    except (OverflowError, TypeError, ValueError):
+        return default
+    if parsed < minimum:
+        return default
+    return min(parsed, maximum)
+
+
+def _coerce_unit_interval(value: object, default: float) -> float:
+    if isinstance(value, bool):
+        return default
+    try:
+        parsed = float(value)
+    except (OverflowError, TypeError, ValueError):
+        return default
+    if not math.isfinite(parsed) or parsed < 0.0 or parsed > 1.0:
+        return default
+    return parsed
+
+
+def _coerce_bool(value: object, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off", ""}:
+            return False
+    return default
 
 
 # ---------------------------------------------------------------------------
@@ -61,6 +255,15 @@ class AutonomousConfig:
     phase_constraint: str = "RIDGE"  # never make changes that leave this phase
     sweep_interval: int = 60  # seconds between full NFET sweeps
 
+    def __post_init__(self) -> None:
+        self.max_impact_radius = _coerce_impact_radius(self.max_impact_radius)
+        self.stress_threshold = _coerce_unit_interval(self.stress_threshold, 0.7)
+        self.min_coverage = _coerce_unit_interval(self.min_coverage, 0.8)
+        self.auto_fix_lint = _coerce_bool(self.auto_fix_lint, True)
+        self.auto_fix_types = _coerce_bool(self.auto_fix_types, True)
+        self.auto_refactor = _coerce_bool(self.auto_refactor, False)
+        self.sweep_interval = _coerce_sweep_interval(self.sweep_interval)
+
 
 # ---------------------------------------------------------------------------
 # File-change handler (watchdog)
@@ -81,6 +284,18 @@ class _FileChangeHandler(FileSystemEventHandler):
     def on_created(self, event: FileSystemEvent) -> None:
         if not event.is_directory:
             self._callback(event.src_path)
+
+    def on_deleted(self, event: FileSystemEvent) -> None:
+        if not event.is_directory:
+            self._callback(event.src_path)
+
+    def on_moved(self, event: FileSystemEvent) -> None:
+        if event.is_directory:
+            return
+        self._callback(event.src_path)
+        dest_path = getattr(event, "dest_path", None)
+        if dest_path:
+            self._callback(dest_path)
 
 
 # ---------------------------------------------------------------------------
@@ -128,7 +343,13 @@ class AutonomousMonitor:
         self.sweep_engine = sweep_engine
         self.config = config or AutonomousConfig()
         self.audit_db = audit_db or AuditDatabase()
-        self.health_db = health_db or HealthDatabase()
+        if health_db is None:
+            from codey.nfet.health_db import HealthDatabase
+
+            self.health_db = HealthDatabase()
+        else:
+            self.health_db = health_db
+        self.controller = NFETController(sweep_engine=sweep_engine)
 
         self._parser = LanguageParser()
         self._running: bool = False
@@ -137,6 +358,8 @@ class AutonomousMonitor:
         self._sweep_thread: threading.Thread | None = None
         self._lock = threading.Lock()
         self._pending_triggers: list[tuple[TriggerCondition, str, dict]] = []
+        self._last_candidates: list[dict[str, Any]] = []
+        self._watch_path: Path | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -152,22 +375,38 @@ class AutonomousMonitor:
             logger.warning("Monitor already running — ignoring duplicate start()")
             return
 
-        self._running = True
+        _require_watchdog()
         watch_path = watch_path.resolve()
+        self._watch_path = watch_path
 
         # --- File watcher ---
         handler = _FileChangeHandler(self._on_file_change)
         observer = Observer()
-        observer.schedule(handler, str(watch_path), recursive=True)
-        observer.daemon = True
-        observer.start()
+        try:
+            observer.schedule(handler, str(watch_path), recursive=True)
+            observer.daemon = True
+            observer.start()
+        except Exception:
+            _stop_monitor_observer_safely(observer, context="startup error")
+            self._watch_path = None
+            raise
+
         self._watchers.append(observer)
+        self._running = True
 
         # --- Sweep loop ---
-        self._sweep_thread = threading.Thread(
-            target=self._sweep_loop, name="codey-sweep-loop", daemon=True
-        )
-        self._sweep_thread.start()
+        try:
+            self._sweep_thread = threading.Thread(
+                target=self._sweep_loop, name="codey-sweep-loop", daemon=True
+            )
+            self._sweep_thread.start()
+        except Exception:
+            self._running = False
+            _stop_monitor_observer_safely(observer, context="startup error")
+            self._watchers.clear()
+            self._sweep_thread = None
+            self._watch_path = None
+            raise
 
         logger.info(
             "Autonomous monitor started — watching %s, sweep every %ds",
@@ -184,15 +423,18 @@ class AutonomousMonitor:
 
         # Stop file watchers
         for observer in self._watchers:
-            observer.stop()
-        for observer in self._watchers:
-            observer.join(timeout=5.0)
+            _stop_monitor_observer_safely(observer, context="shutdown")
         self._watchers.clear()
 
         # Wait for sweep thread
         if self._sweep_thread is not None:
-            self._sweep_thread.join(timeout=self.config.sweep_interval + 5)
+            _join_monitor_thread_safely(
+                self._sweep_thread,
+                timeout=self.config.sweep_interval + 5,
+                context="shutdown",
+            )
             self._sweep_thread = None
+        self._watch_path = None
 
         logger.info("Autonomous monitor stopped.")
 
@@ -212,21 +454,51 @@ class AutonomousMonitor:
         if path.suffix.lower() not in {".py", ".js", ".ts", ".jsx", ".tsx"}:
             return
 
+        graph_file_path = self._graph_file_path(path)
+        if graph_file_path is None:
+            return
+
+        if not path.exists():
+            with self._lock:
+                self.graph.remove_file(graph_file_path)
+            return
+
         logger.debug("File change detected: %s", file_path)
 
         try:
             new_nodes, new_edges = self._parser.parse_file(path)
         except Exception as exc:
-            logger.warning("Failed to re-parse %s: %s", file_path, exc)
+            logger.warning(
+                "Failed to re-parse %s: %s", file_path, _redact_monitor_error(exc)
+            )
             return
 
+        for node in new_nodes:
+            node.file_path = graph_file_path
+
         with self._lock:
-            self.graph.update_file(file_path, new_nodes, new_edges)
+            self.graph.update_file(graph_file_path, new_nodes, new_edges)
 
         # Check triggers for all nodes in this file
-        triggers = self._check_triggers(file_path)
+        triggers = self._check_triggers(graph_file_path)
         for trigger, component, details in triggers:
             self._handle_trigger(trigger, component, details)
+
+    def _graph_file_path(self, path: Path) -> str | None:
+        try:
+            resolved = path.resolve()
+        except (OSError, RuntimeError, ValueError) as exc:
+            logger.debug(
+                "Ignoring unresolvable file change path %r: %s", str(path), exc
+            )
+            return None
+        if self._watch_path is None:
+            return str(resolved)
+        try:
+            return resolved.relative_to(self._watch_path).as_posix()
+        except ValueError:
+            logger.debug("Ignoring change outside watch root: %s", resolved)
+            return None
 
     # ------------------------------------------------------------------
     # Background sweep loop
@@ -241,7 +513,7 @@ class AutonomousMonitor:
             try:
                 self._run_single_sweep()
             except Exception as exc:
-                logger.error("Sweep loop error: %s", exc, exc_info=True)
+                logger.error("Sweep loop error: %s", _redact_monitor_error(exc))
 
             # Sleep in small increments so we can exit promptly
             deadline = time.monotonic() + self.config.sweep_interval
@@ -259,7 +531,9 @@ class AutonomousMonitor:
         try:
             self.health_db.log_sweep(result)
         except Exception as exc:
-            logger.warning("Failed to log sweep to health_db: %s", exc)
+            logger.warning(
+                "Failed to log sweep to health_db: %s", _redact_monitor_error(exc)
+            )
 
         # Check for phase degradation
         if self._last_sweep is not None:
@@ -311,7 +585,7 @@ class AutonomousMonitor:
         module_nodes = self.graph.get_module_nodes(file_path)
 
         for node_id in module_nodes:
-            stress = self.graph.stress_score(node_id)
+            stress = _coerce_monitor_stress(self.graph.stress_score(node_id))
 
             # --- STRESS_THRESHOLD ---
             if stress > self.config.stress_threshold:
@@ -358,13 +632,24 @@ class AutonomousMonitor:
                     except nx.NetworkXNoCycle:
                         pass
             except Exception as exc:
-                logger.debug("Cycle check failed for %s: %s", node_id, exc)
+                logger.debug(
+                    "Cycle check failed for %s: %s", node_id, _redact_monitor_error(exc)
+                )
 
         return triggers
 
     # ------------------------------------------------------------------
     # Trigger handling — the autonomous decision algorithm
     # ------------------------------------------------------------------
+
+    def _clear_pending_trigger(
+        self, pending_trigger: tuple[TriggerCondition, str, dict]
+    ) -> None:
+        with self._lock:
+            for index, item in enumerate(self._pending_triggers):
+                if item is pending_trigger:
+                    del self._pending_triggers[index]
+                    break
 
     def _handle_trigger(
         self,
@@ -392,11 +677,17 @@ class AutonomousMonitor:
             details,
         )
 
+        pending_trigger = (trigger, component, details)
         with self._lock:
-            self._pending_triggers.append((trigger, component, details))
+            self._pending_triggers.append(pending_trigger)
 
         # --- Boundary check ---
-        if not self._is_within_boundaries(component):
+        try:
+            within_boundaries = self._is_within_boundaries(component)
+        except Exception:
+            self._clear_pending_trigger(pending_trigger)
+            raise
+        if not within_boundaries:
             logger.info(
                 "Action suppressed for %s: exceeds max_impact_radius (%d) "
                 "or would violate phase_constraint (%s)",
@@ -404,47 +695,77 @@ class AutonomousMonitor:
                 self.config.max_impact_radius,
                 self.config.phase_constraint,
             )
+            self._clear_pending_trigger(pending_trigger)
             return
 
         # --- Check if auto-action is enabled for this trigger ---
-        if not self._is_auto_enabled(trigger):
+        try:
+            auto_enabled = self._is_auto_enabled(trigger)
+        except Exception:
+            self._clear_pending_trigger(pending_trigger)
+            raise
+        if not auto_enabled:
             logger.info(
                 "Auto-action not enabled for trigger %s — logging only.",
                 trigger.value,
             )
+            self._clear_pending_trigger(pending_trigger)
             return
 
         # --- Capture before-state ---
         before_sweep = self._last_sweep
         if before_sweep is None:
             # Run a sweep to establish baseline
-            with self._lock:
-                before_sweep = self.sweep_engine.run(self.graph)
+            try:
+                with self._lock:
+                    before_sweep = self.sweep_engine.run(self.graph)
+            except Exception:
+                self._clear_pending_trigger(pending_trigger)
+                raise
             self._last_sweep = before_sweep
 
-        stress_before = self.graph.stress_score(component) if component in self.graph._graph else 0.0
+        try:
+            stress_before = (
+                _coerce_monitor_stress(self.graph.stress_score(component))
+                if component in self.graph._graph
+                else 0.0
+            )
+        except Exception:
+            self._clear_pending_trigger(pending_trigger)
+            raise
 
         # --- Generate and score candidates ---
-        candidates = self._generate_candidates(trigger, component, details)
+        try:
+            candidates = self._generate_candidates(trigger, component, details)
+        except Exception:
+            self._clear_pending_trigger(pending_trigger)
+            raise
+        self._last_candidates = candidates
 
         if not candidates:
             logger.info("No viable candidates generated for %s on %s", trigger.value, component)
+            self._clear_pending_trigger(pending_trigger)
             return
 
         # Score each candidate: higher is better
-        scored = []
-        for candidate in candidates:
-            score = self._score_candidate(candidate, before_sweep)
-            scored.append((score, candidate))
+        try:
+            scored = []
+            for candidate in candidates:
+                score = self._score_candidate(candidate, before_sweep)
+                scored.append((score, candidate))
 
-        scored.sort(key=lambda x: x[0], reverse=True)
-        best_score, best_candidate = scored[0]
+            scored.sort(key=lambda x: x[0], reverse=True)
+            best_score, best_candidate = scored[0]
+        except Exception:
+            self._clear_pending_trigger(pending_trigger)
+            raise
 
         if best_score <= 0:
             logger.info(
                 "Best candidate score is %.3f (non-positive) — skipping action.",
                 best_score,
             )
+            self._clear_pending_trigger(pending_trigger)
             return
 
         # --- Execute the candidate ---
@@ -457,7 +778,7 @@ class AutonomousMonitor:
         # PLACEHOLDER: actual code modification goes through CodeAgent.
         # For now, we log the intent and record it in the audit trail.
         change_diff = (
-            f"[PLACEHOLDER] Would apply: {best_candidate.get('description', 'unknown')}\n"
+            f"[PLACEHOLDER] Would apply: {best_candidate.get('title', best_candidate.get('description', 'unknown'))}\n"
             f"Target: {component}\n"
             f"Trigger: {trigger.value}\n"
             f"Candidate details: {best_candidate}"
@@ -468,32 +789,35 @@ class AutonomousMonitor:
         # --- Capture after-state (unchanged since placeholder) ---
         stress_after = stress_before  # no actual change yet
 
-        with self._lock:
-            after_sweep = self.sweep_engine.run(self.graph)
+        try:
+            with self._lock:
+                after_sweep = self.sweep_engine.run(self.graph)
+        except Exception:
+            self._clear_pending_trigger(pending_trigger)
+            raise
 
         # --- Audit trail ---
-        self.audit_db.log_action(
-            trigger_condition=trigger.value,
-            component_affected=component,
-            stress_before=stress_before,
-            stress_after=stress_after,
-            kappa_before=before_sweep.kappa,
-            kappa_after=after_sweep.kappa,
-            sigma_before=before_sweep.sigma,
-            sigma_after=after_sweep.sigma,
-            es_before=before_sweep.es_score,
-            es_after=after_sweep.es_score,
-            change_diff=change_diff,
-            test_result=test_result,
-            rolled_back=rolled_back,
-        )
+        try:
+            self.audit_db.log_action(
+                trigger_condition=trigger.value,
+                component_affected=component,
+                stress_before=stress_before,
+                stress_after=stress_after,
+                kappa_before=before_sweep.kappa,
+                kappa_after=after_sweep.kappa,
+                sigma_before=before_sweep.sigma,
+                sigma_after=after_sweep.sigma,
+                es_before=before_sweep.es_score,
+                es_after=after_sweep.es_score,
+                change_diff=change_diff,
+                test_result=test_result,
+                rolled_back=rolled_back,
+            )
+        except Exception:
+            self._clear_pending_trigger(pending_trigger)
+            raise
 
-        # Remove from pending
-        with self._lock:
-            try:
-                self._pending_triggers.remove((trigger, component, details))
-            except ValueError:
-                pass
+        self._clear_pending_trigger(pending_trigger)
 
     # ------------------------------------------------------------------
     # Decision support methods
@@ -501,6 +825,14 @@ class AutonomousMonitor:
 
     def _is_within_boundaries(self, component: str) -> bool:
         """Check if acting on this component stays within the configured safety envelope."""
+        constraint_phase = _coerce_phase_constraint(self.config.phase_constraint)
+        if constraint_phase is None:
+            logger.warning(
+                "Invalid phase_constraint %r — suppressing autonomous action",
+                self.config.phase_constraint,
+            )
+            return False
+
         # Impact radius check
         if component in self.graph._graph:
             radius = self.graph.impact_radius(component)
@@ -516,7 +848,6 @@ class AutonomousMonitor:
         # Phase constraint check: if we are currently in the constrained phase
         # (or better), don't risk leaving it
         if self._last_sweep is not None:
-            constraint_phase = Phase(self.config.phase_constraint.lower())
             constraint_rank = _PHASE_RANK.get(constraint_phase, 2)
             current_rank = _PHASE_RANK.get(self._last_sweep.phase, 0)
             # Only allow action if we are at or above the constraint phase,
@@ -538,7 +869,7 @@ class AutonomousMonitor:
             TriggerCondition.CIRCULAR_DEPENDENCY: self.config.auto_refactor,
             TriggerCondition.PHASE_CHANGE: self.config.auto_refactor,
         }
-        return mapping.get(trigger, False)
+        return mapping.get(trigger, False) is True
 
     def _generate_candidates(
         self,
@@ -558,61 +889,32 @@ class AutonomousMonitor:
         These are heuristic estimates used for ranking — the real impact is
         measured after execution.
         """
-        candidates: list[dict[str, Any]] = []
+        goal = f"autonomous {trigger.value.replace('_', ' ')}"
+        target_file = details.get("file_path")
+        with self._lock:
+            repo_state = self.controller.analyze(
+                self.graph,
+                goal=goal,
+                target_file=target_file,
+            )
+            ranked = self.controller.rank_interventions(
+                self.graph,
+                goal=goal,
+                target_file=target_file,
+                repo_state=repo_state,
+                limit=5,
+                focus_component=component,
+            )
 
-        if trigger == TriggerCondition.LINT_ERROR:
+        candidates = [candidate.to_dict() for candidate in ranked]
+
+        if trigger == TriggerCondition.LINT_ERROR and not candidates:
             candidates.append({
+                "title": f"Auto-fix lint errors in {component}",
                 "description": f"Auto-fix lint errors in {component}",
-                "action_type": "lint_fix",
-                "estimated_es_delta": 0.01,
-                "estimated_coverage_delta": 0.0,
-                "estimated_complexity_delta": -0.5,
-                "details": details,
-            })
-
-        elif trigger == TriggerCondition.STRESS_THRESHOLD:
-            stress = details.get("stress", 0.0)
-            # Suggest extracting high-coupling dependencies
-            candidates.append({
-                "description": f"Extract dependencies to reduce stress on {component} (stress={stress:.2f})",
-                "action_type": "extract_dependency",
-                "estimated_es_delta": 0.05,
-                "estimated_coverage_delta": 0.0,
-                "estimated_complexity_delta": -2.0,
-                "details": details,
-            })
-            # Suggest interface introduction
-            candidates.append({
-                "description": f"Introduce interface boundary to decouple {component}",
-                "action_type": "introduce_interface",
-                "estimated_es_delta": 0.08,
-                "estimated_coverage_delta": -0.02,
-                "estimated_complexity_delta": 1.0,
-                "details": details,
-            })
-
-        elif trigger == TriggerCondition.CIRCULAR_DEPENDENCY:
-            cycle = details.get("cycle", [])
-            candidates.append({
-                "description": f"Break circular dependency involving {component} ({len(cycle)} nodes)",
-                "action_type": "break_cycle",
-                "estimated_es_delta": 0.1,
-                "estimated_coverage_delta": 0.0,
-                "estimated_complexity_delta": -1.0,
-                "details": details,
-            })
-
-        elif trigger == TriggerCondition.PHASE_CHANGE:
-            candidates.append({
-                "description": (
-                    f"Emergency stabilisation: phase degraded from "
-                    f"{details.get('previous_phase', '?')} to {details.get('current_phase', '?')}"
-                ),
-                "action_type": "phase_stabilise",
-                "estimated_es_delta": 0.15,
-                "estimated_coverage_delta": 0.0,
-                "estimated_complexity_delta": 0.0,
-                "details": details,
+                "kind": "lint_fix",
+                "score": 0.05,
+                "predicted_repo_es_delta": 0.01,
             })
 
         return candidates
@@ -629,9 +931,16 @@ class AutonomousMonitor:
         Higher is better.  Complexity delta is negative-is-good, so it
         contributes positively when complexity decreases.
         """
-        es_delta = candidate.get("estimated_es_delta", 0.0)
-        coverage_delta = candidate.get("estimated_coverage_delta", 0.0)
-        complexity_delta = candidate.get("estimated_complexity_delta", 0.0)
+        if "score" in candidate:
+            return _coerce_candidate_score(candidate["score"])
+
+        es_delta = _coerce_candidate_score(candidate.get("estimated_es_delta", 0.0))
+        coverage_delta = _coerce_candidate_score(
+            candidate.get("estimated_coverage_delta", 0.0)
+        )
+        complexity_delta = _coerce_candidate_score(
+            candidate.get("estimated_complexity_delta", 0.0)
+        )
 
         # Weights — ES improvement is the primary objective
         w_es = 10.0
@@ -643,7 +952,7 @@ class AutonomousMonitor:
             + w_coverage * coverage_delta
             + w_complexity * (-complexity_delta)  # negative complexity is good
         )
-        return score
+        return _clamp_candidate_score(score)
 
     # ------------------------------------------------------------------
     # Status
@@ -679,6 +988,7 @@ class AutonomousMonitor:
                 }
                 for t, c, d in pending
             ],
+            "last_candidates": self._last_candidates[:3],
             "recent_actions_count": len(recent_actions),
             "total_rollbacks": self.audit_db.get_rollback_count(),
         }

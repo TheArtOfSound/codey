@@ -20,17 +20,17 @@ import {
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface ReferralStats {
-  referral_code: string;
   referral_link: string;
-  total_sent: number;
-  total_converted: number;
-  credits_earned: number;
+  total_referrals: number;
+  pending: number;
+  converted: number;
+  total_credits_earned: number;
 }
 
 interface Referral {
   id: string;
   email: string;
-  status: "pending" | "signed_up" | "converted";
+  status: "pending" | "converted";
   invited_at: string;
   converted_at: string | null;
   credits_earned: number;
@@ -50,8 +50,6 @@ function statusBadge(status: Referral["status"]): { label: string; color: string
   switch (status) {
     case "pending":
       return { label: "Pending", color: "bg-codey-yellow/20 text-codey-yellow" };
-    case "signed_up":
-      return { label: "Signed Up", color: "bg-codey-text-dim/20 text-codey-text-dim" };
     case "converted":
       return { label: "Converted", color: "bg-codey-green/20 text-codey-green" };
   }
@@ -71,62 +69,14 @@ export default function ReferralsPage() {
       try {
         const [statsData, refData] = await Promise.all([
           api.get<ReferralStats>("/referrals/stats"),
-          api.get<Referral[]>("/referrals"),
+          api.get<Referral[]>("/referrals/history"),
         ]);
         setStats(statsData);
         setReferrals(refData);
-      } catch {
-        // Demo data
-        const code = user?.email?.split("@")[0]?.toUpperCase() || "CODEY";
-        setStats({
-          referral_code: code,
-          referral_link: `https://codey.ai/ref/${code}`,
-          total_sent: 8,
-          total_converted: 3,
-          credits_earned: 750,
-        });
-        setReferrals([
-          {
-            id: "r1",
-            email: "alice@example.com",
-            status: "converted",
-            invited_at: new Date(Date.now() - 604800_000).toISOString(),
-            converted_at: new Date(Date.now() - 432000_000).toISOString(),
-            credits_earned: 250,
-          },
-          {
-            id: "r2",
-            email: "bob@example.com",
-            status: "converted",
-            invited_at: new Date(Date.now() - 1209600_000).toISOString(),
-            converted_at: new Date(Date.now() - 864000_000).toISOString(),
-            credits_earned: 250,
-          },
-          {
-            id: "r3",
-            email: "carol@example.com",
-            status: "signed_up",
-            invited_at: new Date(Date.now() - 259200_000).toISOString(),
-            converted_at: null,
-            credits_earned: 0,
-          },
-          {
-            id: "r4",
-            email: "dan@example.com",
-            status: "converted",
-            invited_at: new Date(Date.now() - 172800_000).toISOString(),
-            converted_at: new Date(Date.now() - 86400_000).toISOString(),
-            credits_earned: 250,
-          },
-          {
-            id: "r5",
-            email: "eve@example.com",
-            status: "pending",
-            invited_at: new Date(Date.now() - 86400_000).toISOString(),
-            converted_at: null,
-            credits_earned: 0,
-          },
-        ]);
+      } catch (err) {
+        console.error("Failed to load referrals:", err);
+        setStats(null);
+        setReferrals([]);
       } finally {
         setLoading(false);
       }
@@ -173,7 +123,7 @@ export default function ReferralsPage() {
           Referrals
         </h1>
         <p className="mt-1 text-sm text-codey-text-dim">
-          Invite other developers and earn 250 credits for every referral that upgrades.
+          Invite other developers and earn 5 bonus credits when a referral upgrades.
         </p>
       </div>
 
@@ -240,17 +190,17 @@ export default function ReferralsPage() {
               <Send className="h-4 w-4 text-codey-text-dim" />
               <span className="text-xs font-medium text-codey-text-muted">Referrals Sent</span>
             </div>
-            <p className="mt-2 text-2xl font-bold text-codey-text">{stats.total_sent}</p>
+            <p className="mt-2 text-2xl font-bold text-codey-text">{stats.total_referrals}</p>
           </div>
           <div className="rounded-xl border border-codey-border bg-codey-card p-5">
             <div className="flex items-center gap-2">
               <UserCheck className="h-4 w-4 text-codey-green" />
               <span className="text-xs font-medium text-codey-text-muted">Converted</span>
             </div>
-            <p className="mt-2 text-2xl font-bold text-codey-text">{stats.total_converted}</p>
-            {stats.total_sent > 0 && (
+            <p className="mt-2 text-2xl font-bold text-codey-text">{stats.converted}</p>
+            {stats.total_referrals > 0 && (
               <p className="mt-1 text-xs text-codey-text-dim">
-                {((stats.total_converted / stats.total_sent) * 100).toFixed(0)}% conversion rate
+                {((stats.converted / stats.total_referrals) * 100).toFixed(0)}% conversion rate
               </p>
             )}
           </div>
@@ -260,7 +210,7 @@ export default function ReferralsPage() {
               <span className="text-xs font-medium text-codey-text-muted">Credits Earned</span>
             </div>
             <p className="mt-2 text-2xl font-bold text-codey-green">
-              {stats.credits_earned.toLocaleString()}
+              {stats.total_credits_earned.toLocaleString()}
             </p>
           </div>
         </div>
@@ -279,12 +229,12 @@ export default function ReferralsPage() {
             {
               step: "2",
               title: "They sign up",
-              desc: "They create an account and get bonus free credits",
+              desc: "They create an account and can later upgrade to a paid plan",
             },
             {
               step: "3",
               title: "You both earn",
-              desc: "When they upgrade to Pro, you both get 250 credits",
+              desc: "When they upgrade, you get 5 credits and they receive 3 bonus credits",
             },
           ].map(({ step, title, desc }) => (
             <div key={step} className="flex items-start gap-3">

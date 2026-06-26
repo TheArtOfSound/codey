@@ -194,10 +194,10 @@ def run_build_phase(
     user_id = safe_user_id
 
     async def _run() -> dict:
-        from codey.saas.database import async_session_factory
+        from codey.saas.database import async_session_factory, task_db_session
         from sqlalchemy import text
 
-        async with async_session_factory() as db:
+        async with task_db_session() as db:
             row = await db.execute(
                 text(
                     "SELECT id, name, status, current_phase, total_phases, "
@@ -270,7 +270,24 @@ def run_build_phase(
 
             # Full build pipeline for this phase
             try:
-                from codey.saas.intelligence.providers import call_model, resolve_model
+                from codey.saas.intelligence.providers import call_model, resolve_model, set_byok_override
+
+                try:
+                    _byok_row = (await db.execute(
+                        text("SELECT byok_provider, byok_api_key, byok_model FROM users WHERE id = :uid"),
+                        {"uid": user_id},
+                    )).mappings().first()
+                    if _byok_row and _byok_row.get("byok_provider") and _byok_row.get("byok_api_key"):
+                        from codey.saas.security.encryption import decrypt_token
+                        try:
+                            _bk = decrypt_token(_byok_row["byok_api_key"])
+                        except Exception:
+                            _bk = None
+                        set_byok_override(_byok_row.get("byok_provider"), _bk, _byok_row.get("byok_model"))
+                    else:
+                        set_byok_override(None, None, None)
+                except Exception:
+                    set_byok_override(None, None, None)
 
                 provider, model = resolve_model("code_generation")
             except Exception as exc:
