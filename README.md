@@ -2,6 +2,8 @@
 
 **Repository-aware coding and structural health platform for real codebases.**
 
+[![TOKENS verified AI-work profile](https://ledger.imagineqira.com/data/badge.svg)](https://ledger.imagineqira.com/u/bryan)
+
 ## What Codey Does
 
 - **Structural Health Analysis** -- Codey models repository dependencies, stress, and code-health signals so it can reason about system-level impact instead of only individual files.
